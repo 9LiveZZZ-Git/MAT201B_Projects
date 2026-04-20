@@ -1,5 +1,5 @@
-// Corvid M1 alpha demo — v0.2
-// Energy · Reproduction · Death · Place grid · 3 entity types
+// Corvid M1/M2 alpha demo — v0.3
+// Energy · Reproduction · Death · Place grid (Kahan EMA) · Entities · Memory rings
 #include "al/app/al_App.hpp"
 #include "al/graphics/al_Shapes.hpp"
 #include "al/math/al_Random.hpp"
@@ -11,8 +11,11 @@
 #include "Gamma/Oscillator.h"
 
 #include "core/Agent.hpp"
+#include "core/Memory.hpp"
+#include "core/MemoryRing.hpp"
 #include "core/Place.hpp"
 #include "core/SpatialHash.hpp"
+#include "cognition/Perception.hpp"
 #include "environment/AcornPlant.hpp"
 #include "environment/BoulderObstacle.hpp"
 #include "environment/HawkPredator.hpp"
@@ -67,6 +70,11 @@ struct CorvidM1 : App {
 
     // --- place grid ---
     std::array<Place, PLACE_GRID_CELLS> places;
+
+    // --- M2: per-agent memory rings + fixed encoder ---
+    std::array<MemoryRing<256>, N_POOL> mem_rings{};
+    FixedEncoder encoder;
+    int cognition_counter = 0;  // increments each frame; fires perception at 5 Hz
 
     // --- entities ---
     std::vector<std::unique_ptr<Entity>> entities;
@@ -179,6 +187,7 @@ struct CorvidM1 : App {
         nav().faceToward({0, 0, 0});
 
         gam::sampleRate(audioIO().framesPerSecond());
+        encoder.init();
 
         // Build tetrahedron mesh once
         addTetrahedron(tetra_m);
@@ -287,6 +296,18 @@ struct CorvidM1 : App {
                          float(hawk->position.z));
                 writePlace(places, hp, MK_PREDATOR, -0.9f, HALF_W);
                 beep(180.f);
+                // write predator-strike memory for hit agent
+                {
+                    int pidx = placeIndex(hp, HALF_W);
+                    ObsVec obs{};  // minimal obs — full perception fires at 5 Hz
+                    Memory m;
+                    m.timestamp = sim_time;
+                    m.kind      = MK_PREDATOR;
+                    m.place_id  = uint32_t(pidx);
+                    m.salience  = memSalience(MK_PREDATOR, pool[hit].energy + hawk->E_damage, pool[hit].energy);
+                    encoder.encode(obs.v, m.vec);
+                    mem_rings[hit].push(m);
+                }
             }
         }
 
@@ -397,6 +418,14 @@ struct CorvidM1 : App {
                     if (res.entity_consumed) {
                         writePlace(places, pos_i, res.memory_kind, res.valence, HALF_W);
                         beep(600.f);
+                        // food memory
+                        Memory fm;
+                        fm.timestamp = sim_time;
+                        fm.kind      = MK_FOOD;
+                        fm.place_id  = uint32_t(placeIndex(pos_i, HALF_W));
+                        fm.salience  = memSalience(MK_FOOD, a.energy - res.energy_delta, a.energy);
+                        ObsVec fobs{}; encoder.encode(fobs.v, fm.vec);
+                        mem_rings[i].push(fm);
                     }
                     if (res.agent_dies) to_kill.push_back(i);
                 }
@@ -459,6 +488,91 @@ struct CorvidM1 : App {
                          float(pool[child].nav.pos().z));
                 writePlace(places, cp, MK_BIRTH, 0.5f, HALF_W);
                 beep(1200.f);
+                // birth memory for parent
+                Memory bm;
+                bm.timestamp = sim_time;
+                bm.kind      = MK_BIRTH;
+                bm.place_id  = uint32_t(placeIndex(cp, HALF_W));
+                bm.salience  = 0.7f;
+                ObsVec bobs{}; encoder.encode(bobs.v, bm.vec);
+                mem_rings[s].push(bm);
+            }
+        }
+
+        // 9. Perception tick at ~5 Hz (every 12th animate call at 60 fps)
+        ++cognition_counter;
+        if (cognition_counter >= 12) {
+            cognition_counter = 0;
+            for (int i = 0; i < N_POOL; ++i) {
+                Agent& a = pool[i];
+                if (!a.live) continue;
+
+                Vec3f pos_i(float(a.nav.pos().x),
+                            float(a.nav.pos().y),
+                            float(a.nav.pos().z));
+                int pidx = placeIndex(pos_i, HALF_W);
+
+                // Find nearest food
+                bool  has_food  = false;
+                Vec3f food_dir  = {};
+                float food_dist = 1.f;
+                float best_fd2  = (HALF_W * 2.f) * (HALF_W * 2.f);
+                for (auto& e : entities) {
+                    if (e->category != PLANT || !e->alive) continue;
+                    Vec3f d = e->position - pos_i;
+                    for (int ax = 0; ax < 3; ++ax) {
+                        if (d[ax] >  HALF_W) d[ax] -= W;
+                        if (d[ax] < -HALF_W) d[ax] += W;
+                    }
+                    float d2 = d.magSqr();
+                    if (d2 < best_fd2) {
+                        best_fd2 = d2;
+                        float dm = std::sqrt(d2);
+                        food_dir  = dm > 0.f ? d / dm : Vec3f{};
+                        food_dist = dm / (W);
+                        has_food  = true;
+                    }
+                }
+
+                // Find nearest predator
+                bool  has_pred  = false;
+                Vec3f pred_dir  = {};
+                float pred_dist = 1.f;
+                float best_pd2  = (HALF_W * 2.f) * (HALF_W * 2.f);
+                for (auto* hawk : hawks) {
+                    Vec3f d = hawk->position - pos_i;
+                    for (int ax = 0; ax < 3; ++ax) {
+                        if (d[ax] >  HALF_W) d[ax] -= W;
+                        if (d[ax] < -HALF_W) d[ax] += W;
+                    }
+                    float d2 = d.magSqr();
+                    if (d2 < best_pd2) {
+                        best_pd2 = d2;
+                        float dm = std::sqrt(d2);
+                        pred_dir  = dm > 0.f ? d / dm : Vec3f{};
+                        pred_dist = dm / (W);
+                        has_pred  = true;
+                    }
+                }
+
+                PerceptInput pin{a, vel[i], places[pidx],
+                                 HALF_W, float(max_spd),
+                                 0, {}, {},
+                                 has_food, food_dir, food_dist,
+                                 has_pred, pred_dir, pred_dist};
+
+                ObsVec obs = buildObsVec(pin);
+
+                Memory pm;
+                pm.timestamp = sim_time;
+                pm.kind      = MK_NOVELTY;
+                pm.place_id  = uint32_t(pidx);
+                pm.salience  = 0.15f + places[pidx].novelty_score * 0.5f;
+                encoder.encode(obs.v, pm.vec);
+                mem_rings[i].push(pm);
+
+                // Decay ring salience
+                mem_rings[i].decaySalience(0.98f);
             }
         }
     }
@@ -476,38 +590,60 @@ struct CorvidM1 : App {
         for (auto& e : entities)
             e->draw(g);
 
-        // --- place grid wireframe ---
-        const float cell = W / float(PLACE_GRID_N);
-        for (auto& pl : places) {
-            float nov = pl.novelty_score;
-            if (nov < 0.005f) continue;
-            // valence: positive=cyan, negative=orange
-            float val = pl.avg_valence;
-            if (val >= 0.f)
-                g.color(0.1f, 0.8f, 0.9f, nov * 0.55f);
-            else
-                g.color(0.9f, 0.5f, 0.1f, nov * 0.55f);
+        // --- place grid novelty heat map (M2 visualizer) ---
+        // Layer 1: translucent solid voxels scaled by novelty (heat map fill).
+        // Layer 2: thin wireframe edges for high-novelty cells.
+        // Color: cyan = net positive valence (food/birth), orange = negative (death/predator).
+        {
+            const float cell = W / float(PLACE_GRID_N);
+            Mesh cube_solid{Mesh::TRIANGLES};
+            addCube(cube_solid);
 
-            g.pushMatrix();
-            g.translate(pl.center);
-            g.scale(cell * 0.5f);
-            Mesh wf{Mesh::LINES};
-            // 12 edges of a cube
-            float h = 1.f;
-            wf.vertex(-h,-h,-h); wf.vertex( h,-h,-h);
-            wf.vertex( h,-h,-h); wf.vertex( h, h,-h);
-            wf.vertex( h, h,-h); wf.vertex(-h, h,-h);
-            wf.vertex(-h, h,-h); wf.vertex(-h,-h,-h);
-            wf.vertex(-h,-h, h); wf.vertex( h,-h, h);
-            wf.vertex( h,-h, h); wf.vertex( h, h, h);
-            wf.vertex( h, h, h); wf.vertex(-h, h, h);
-            wf.vertex(-h, h, h); wf.vertex(-h,-h, h);
-            wf.vertex(-h,-h,-h); wf.vertex(-h,-h, h);
-            wf.vertex( h,-h,-h); wf.vertex( h,-h, h);
-            wf.vertex( h, h,-h); wf.vertex( h, h, h);
-            wf.vertex(-h, h,-h); wf.vertex(-h, h, h);
-            g.draw(wf);
-            g.popMatrix();
+            for (auto& pl : places) {
+                float nov = pl.novelty_score;
+                if (nov < 0.008f) continue;
+
+                float val  = pl.avg_valence;
+                float fill = nov * 0.30f;  // solid fill alpha
+                float edge = nov * 0.70f;  // wireframe alpha
+
+                float r, gg, b;
+                if (val >= 0.f) {
+                    // cyan
+                    r = 0.05f + val * 0.3f; gg = 0.75f; b = 0.95f;
+                } else {
+                    // orange
+                    r = 0.95f; gg = 0.45f + val * 0.3f; b = 0.05f;
+                }
+
+                // Solid translucent voxel
+                g.pushMatrix();
+                g.translate(pl.center);
+                g.scale(cell * 0.48f);
+                g.color(r, gg, b, fill);
+                g.draw(cube_solid);
+
+                // Wireframe overlay on same cell
+                if (nov > 0.05f) {
+                    Mesh wf{Mesh::LINES};
+                    const float h = 1.f;
+                    wf.vertex(-h,-h,-h); wf.vertex( h,-h,-h);
+                    wf.vertex( h,-h,-h); wf.vertex( h, h,-h);
+                    wf.vertex( h, h,-h); wf.vertex(-h, h,-h);
+                    wf.vertex(-h, h,-h); wf.vertex(-h,-h,-h);
+                    wf.vertex(-h,-h, h); wf.vertex( h,-h, h);
+                    wf.vertex( h,-h, h); wf.vertex( h, h, h);
+                    wf.vertex( h, h, h); wf.vertex(-h, h, h);
+                    wf.vertex(-h, h, h); wf.vertex(-h,-h, h);
+                    wf.vertex(-h,-h,-h); wf.vertex(-h,-h, h);
+                    wf.vertex( h,-h,-h); wf.vertex( h,-h, h);
+                    wf.vertex( h, h,-h); wf.vertex( h, h, h);
+                    wf.vertex(-h, h,-h); wf.vertex(-h, h, h);
+                    g.color(r, gg, b, edge);
+                    g.draw(wf);
+                }
+                g.popMatrix();
+            }
         }
 
         // --- agents ---
@@ -578,7 +714,8 @@ struct CorvidM1 : App {
 // main
 // ---------------------------------------------------------------------------
 int main() {
-    CorvidM1 app;
-    app.configureAudio(44100, 512, 2, 0);
-    app.start();
+    // Heap-allocate: MemoryRing array alone is ~18 MB — too large for the default stack.
+    auto app = std::make_unique<CorvidM1>();
+    app->configureAudio(44100, 512, 2, 0);
+    app->start();
 }

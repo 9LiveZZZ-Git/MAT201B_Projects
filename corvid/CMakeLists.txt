@@ -171,11 +171,25 @@ if(CORVID_USE_TORCH)
 endif()
 
 # --------------------------------------------------------------------------
-# corvid_m1 — M1 alpha demo (energy · reproduction · death · place grid · entities)
+# corvid_m1 — M1/M2 alpha demo
 # --------------------------------------------------------------------------
-add_executable(corvid_m1 src/main_corvid.cpp)
+add_executable(corvid_m1
+    src/main_corvid.cpp
+    cognition/Perception.cpp
+)
 target_link_libraries(corvid_m1 PRIVATE al)
 corvid_target_flags(corvid_m1)
+
+# --------------------------------------------------------------------------
+# corvid_m2_test — Kahan EMA unit tests (M2 acceptance, spec §3.10.6)
+# --------------------------------------------------------------------------
+add_executable(corvid_m2_test test/test_place_kahan.cpp)
+target_include_directories(corvid_m2_test PRIVATE ${CORVID_INCLUDE_DIRS})
+if(MSVC)
+    target_compile_options(corvid_m2_test PRIVATE /W3 /WX-)
+else()
+    target_compile_options(corvid_m2_test PRIVATE -Wall -Wextra)
+endif()
 
 if(CORVID_USE_LLM)
   add_executable(corvid_llm_smoke

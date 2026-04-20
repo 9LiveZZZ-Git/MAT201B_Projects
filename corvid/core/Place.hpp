@@ -9,27 +9,33 @@ namespace corvid {
 // Place grid — the spatial memory substrate (spec §2.2.2).
 // 8³ cells for the alpha demo (spec target is 32³; bump PLACE_GRID_N later).
 // Cell size = W / PLACE_GRID_N; world is [-W/2, W/2]³ centered at origin.
+//
+// EMA accumulators use Kahan compensated summation (spec §2.2.0.d, §3.10.6)
+// to prevent fp32 drift after ≥1M updates without switching to fp64.
 
 static constexpr int   PLACE_GRID_N     = 8;
 static constexpr int   PLACE_GRID_CELLS = PLACE_GRID_N * PLACE_GRID_N * PLACE_GRID_N;
 
 struct Place {
     uint32_t  id          = 0;
-    al::Vec3f center;                   // cell centre in world coords
+    al::Vec3f center;                      // cell centre in world coords
 
-    float     event_counts[16]  = {};   // per MemoryKind (spec §2.2.1), EMA-decayed
-    float     avg_valence       = 0.f;  // running EMA of interaction valences
-    float     novelty_score     = 0.f;  // normalised activity; drives render brightness
+    float     event_counts[16]  = {};      // per MemoryKind EMA
+    float     event_kahan[16]   = {};      // Kahan compensation for event_counts
+    float     avg_valence       = 0.f;     // running EMA of interaction valences
+    float     avg_valence_kahan = 0.f;     // Kahan compensation for avg_valence
+    float     novelty_score     = 0.f;     // normalised activity; drives render brightness
 
     void reset() {
-        std::memset(event_counts, 0, sizeof(event_counts));
-        avg_valence  = 0.f;
-        novelty_score = 0.f;
+        std::memset(event_counts,  0, sizeof(event_counts));
+        std::memset(event_kahan,   0, sizeof(event_kahan));
+        avg_valence        = 0.f;
+        avg_valence_kahan  = 0.f;
+        novelty_score      = 0.f;
     }
 };
 
 // Compute the place-grid index for a world position.
-// world_half = W/2 (half the world side length).
 inline int placeIndex(const al::Vec3f& pos, float world_half) {
     const float cell = (2.f * world_half) / PLACE_GRID_N;
     int px = static_cast<int>(std::floor((pos.x + world_half) / cell));
@@ -59,7 +65,15 @@ inline void initPlaces(std::array<Place, PLACE_GRID_CELLS>& places, float world_
     }
 }
 
-// Write an event at a world position into the place grid.
+// Kahan-compensated additive step: accumulator += delta, tracking error.
+inline void kahanAdd(float& acc, float& comp, float delta) {
+    float y = delta - comp;
+    float t = acc + y;
+    comp = (t - acc) - y;
+    acc  = t;
+}
+
+// Write an event at a world position into the place grid (Kahan EMA).
 // kind: MemoryKind index [0,15].  valence: [-1,1].
 inline void writePlace(std::array<Place, PLACE_GRID_CELLS>& places,
                        const al::Vec3f& pos, int kind, float valence,
@@ -68,8 +82,15 @@ inline void writePlace(std::array<Place, PLACE_GRID_CELLS>& places,
     int idx = placeIndex(pos, world_half);
     auto& pl = places[idx];
     int k = kind & 0xF;
-    pl.event_counts[k] = 0.999f * pl.event_counts[k] + 1.0f;
-    pl.avg_valence      = 0.99f * pl.avg_valence + 0.01f * valence;
+
+    // EMA decay then Kahan-compensated increment of 1.0
+    pl.event_counts[k] *= 0.999f;
+    kahanAdd(pl.event_counts[k], pl.event_kahan[k], 1.0f);
+
+    // EMA for valence: new = 0.99*old + 0.01*valence
+    pl.avg_valence *= 0.99f;
+    kahanAdd(pl.avg_valence, pl.avg_valence_kahan, 0.01f * valence);
+
     // novelty: sum of all event counts, clamped to [0,1]
     float sum = 0.f;
     for (int i = 0; i < 16; ++i) sum += pl.event_counts[i];
