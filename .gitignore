@@ -39,5 +39,10 @@ Release/
 *.aiff
 
 # Corvid build + vendored llama.cpp (clone: git clone --depth 1 --branch b8851 https://github.com/ggerganov/llama.cpp corvid/vendor/llama.cpp)
+# Standalone libtorch zip (download: see pins.toml[torch].cpp_zip_url)
 corvid/build/
 corvid/vendor/llama.cpp/
+corvid/vendor/libtorch/
+corvid/vendor/libtorch-win-cu126.zip
+corvid/vendor/libtorch-win-cpu.zip
+corvid/debug_out.txt

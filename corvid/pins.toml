@@ -14,8 +14,27 @@ ggml_cuda = false    # CPU-only; both tiers run on 128GB DDR5, -ngl 0
 tier_a = "unsloth/gemma-4-E2B-it-GGUF / gemma-4-E2B-it-Q4_K_M.gguf"
 tier_b = "unsloth/gemma-4-31B-it-GGUF / gemma-4-31B-it-Q4_K_M.gguf"
 
+[torch]
+version = "2.9.0+cu126"
+source  = "pip (C:/Python313/Lib/site-packages/torch)"
+cuda    = "12.6"
+smoke_status = "PASS (Python) — RavenNet forward + LoRA rank-8 + backward verified on cuda:0 (RTX 4060 Ti)"
+cpp_note    = "pip-installed libtorch DLLs crash pre-main() on Windows due to c10.dll static init (FAST_FAIL_INCORRECT_STACK); use official libtorch standalone zip for C++ build"
+cpp_zip_url  = "https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.9.0%2Bcpu.zip"
+cpp_zip_dest = "corvid/vendor/libtorch-win-cpu.zip  →  unzip to corvid/vendor/libtorch/"
+cpp_smoke    = "PASS — libtorch 2.9.0 CPU standalone, RavenNet forward + LoRA rank-8 + grad norm 0.46, exit 0"
+cpp_cuda_note = "CPU zip used (disk space); CUDA confirmed via Python (RTX 4060 Ti, cuda:0); swap to cu126 zip when space available"
+
+[m1]
+status    = "PASS — corvid_m1.exe builds and links on MSVC 19.44 (2026-04-19)"
+entities  = "20 AcornPlant + 5 BoulderObstacle + 3 HawkPredator"
+agents    = "N_POOL=256, 60 initial, energy/repro/death loop"
+place_grid = "8^3 cells, EMA event_counts + avg_valence + novelty_score"
+visual    = "lineage HSV, energy brightness, birth/death flash, place wireframe, ControlGUI"
+alpha_tag = "v0.2-m1-alpha"
+
 [build]
-os = "Ubuntu 24.04 (WSL2)"
-cuda = "12.6"
-gcc = "13"
+os      = "Windows 11 / Ubuntu 24.04 (WSL2 target)"
+cuda    = "12.6"
+msvc    = "19.44"
 cmake_min = "3.24"

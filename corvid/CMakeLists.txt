@@ -46,6 +46,50 @@ if(CORVID_USE_LLM)
 endif()
 
 # --------------------------------------------------------------------------
+# Torch — prefer vendor/libtorch standalone zip (no Python DLL init issues),
+# fall back to pip-installed PyTorch for cmake path detection.
+#
+# To use standalone libtorch:
+#   1. Unzip libtorch-win-shared-with-deps-2.9.0+cu126.zip to vendor/libtorch/
+#   2. Re-run cmake (CORVID_TORCH_PREFIX auto-detected)
+# --------------------------------------------------------------------------
+option(CORVID_USE_TORCH "Enable libtorch smoke test" ON)
+
+if(CORVID_USE_TORCH)
+  if(NOT CORVID_TORCH_PREFIX)
+    # 1. Prefer standalone libtorch zip (vendor/libtorch)
+    set(_vendor_libtorch "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libtorch/share/cmake/Torch")
+    if(EXISTS "${_vendor_libtorch}")
+      set(CORVID_TORCH_PREFIX "${_vendor_libtorch}")
+      message(STATUS "Torch: using standalone vendor/libtorch")
+    else()
+      # 2. Fall back to pip-installed (Windows-only caveat: crashes pre-main in standalone exes)
+      execute_process(
+        COMMAND python -c
+          "import torch, os; print(os.path.join(os.path.dirname(torch.__file__), 'share', 'cmake', 'Torch'))"
+        OUTPUT_VARIABLE _torch_cmake_dir
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+      if(_torch_cmake_dir AND EXISTS "${_torch_cmake_dir}")
+        set(CORVID_TORCH_PREFIX "${_torch_cmake_dir}")
+        message(STATUS "Torch: using pip-installed (runtime may crash on Windows standalone exe)")
+      endif()
+    endif()
+  endif()
+
+  if(CORVID_TORCH_PREFIX)
+    set(CAFFE2_USE_CUDA OFF CACHE BOOL "" FORCE)
+    find_package(Torch REQUIRED PATHS "${CORVID_TORCH_PREFIX}" NO_DEFAULT_PATH)
+    message(STATUS "Torch found: ${Torch_VERSION} at ${CORVID_TORCH_PREFIX}")
+    set(CMAKE_CXX_STANDARD 17)
+  else()
+    message(WARNING "CORVID_USE_TORCH=ON but libtorch not found — unzip vendor/libtorch or install torch via pip")
+    set(CORVID_USE_TORCH OFF)
+  endif()
+endif()
+
+# --------------------------------------------------------------------------
 # Helper: apply shared compiler flags
 # --------------------------------------------------------------------------
 function(corvid_target_flags tgt)
@@ -98,6 +142,41 @@ endif()
 # --------------------------------------------------------------------------
 # corvid_llm_smoke — llama.cpp C API wrapper
 # --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# corvid_torch_smoke — libtorch + RavenNet stub + LoRA forward pass
+# --------------------------------------------------------------------------
+if(CORVID_USE_TORCH)
+  add_executable(corvid_torch_smoke src/main_torch_smoke.cpp)
+  target_link_libraries(corvid_torch_smoke PRIVATE "${TORCH_LIBRARIES}")
+  target_include_directories(corvid_torch_smoke PRIVATE ${TORCH_INCLUDE_DIRS})
+  set_property(TARGET corvid_torch_smoke PROPERTY CXX_STANDARD 17)
+  if(MSVC)
+    # Torch requires /bigobj and disables some warnings
+    target_compile_options(corvid_torch_smoke PRIVATE /W3 /WX- /bigobj)
+    # Delay-load core torch DLLs so they init after CRT is fully set up,
+    # avoiding the FAST_FAIL_INCORRECT_STACK crash in ucrtbase.dll DllMain.
+    target_link_options(corvid_torch_smoke PRIVATE
+      /DELAYLOAD:torch.dll /DELAYLOAD:torch_cpu.dll /DELAYLOAD:torch_cuda.dll)
+    target_link_libraries(corvid_torch_smoke PRIVATE delayimp.lib)
+    # Copy torch DLLs next to the exe post-build (exclude torch_python.dll — it
+    # requires a live Python interpreter and crashes DllMain in standalone exes)
+    file(GLOB _torch_dlls "${CORVID_TORCH_PREFIX}/../../../lib/*.dll")
+    list(FILTER _torch_dlls EXCLUDE REGEX "torch_python\\.dll$")
+    add_custom_command(TARGET corvid_torch_smoke POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${_torch_dlls} $<TARGET_FILE_DIR:corvid_torch_smoke>)
+  else()
+    target_compile_options(corvid_torch_smoke PRIVATE -Wall -Wextra)
+  endif()
+endif()
+
+# --------------------------------------------------------------------------
+# corvid_m1 — M1 alpha demo (energy · reproduction · death · place grid · entities)
+# --------------------------------------------------------------------------
+add_executable(corvid_m1 src/main_corvid.cpp)
+target_link_libraries(corvid_m1 PRIVATE al)
+corvid_target_flags(corvid_m1)
+
 if(CORVID_USE_LLM)
   add_executable(corvid_llm_smoke
     src/main_llm_smoke.cpp
