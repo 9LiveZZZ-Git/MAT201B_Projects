@@ -1,6 +1,7 @@
-// Corvid M1/M2 alpha demo — v0.3
-// Energy · Reproduction · Death · Place grid (Kahan EMA) · Entities · Memory rings
+// Corvid M1/M2/M3 alpha demo — v0.4
+// Energy · Reproduction · Death · Place grid · Memory rings · RavenNet · Analysis HUD
 #include "al/app/al_App.hpp"
+#include "al/io/al_Imgui.hpp"
 #include "al/graphics/al_Shapes.hpp"
 #include "al/math/al_Random.hpp"
 #include "al/math/al_Vec.hpp"
@@ -117,6 +118,21 @@ struct CorvidM1 : App {
     uint32_t next_id    = 1;
     uint32_t next_lin   = 1;   // next lineage id
 
+    // --- Analysis HUD rolling history (256 samples, ~4 min at 1 Hz) ---
+    static constexpr int HIST = 256;
+    struct RollingBuf {
+        float v[HIST] = {};
+        int   head    = 0;
+        void push(float x) { v[head] = x; head = (head + 1) % HIST; }
+        // Returns pointer to data starting at oldest sample (head), length HIST
+        const float* data() const { return v; }
+        int offset() const { return head; }
+    };
+    RollingBuf h_population, h_avg_energy, h_births, h_deaths,
+               h_novelty, h_ravenms;
+    float hud_sample_acc = 0.f;    // accumulates dt until 1s sample
+    int   hud_births_tick = 0, hud_deaths_tick = 0;  // since last sample
+
     // shared tetrahedron mesh (populated in onCreate)
     Mesh tetra_m{Mesh::TRIANGLES};
 
@@ -170,6 +186,7 @@ struct CorvidM1 : App {
         a.nav.pos(Vec3d(pos.x, pos.y, pos.z));
         vel[slot] = Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()).normalize() * 0.8f;
         ++n_live; ++n_born;
+        ++hud_births_tick;
         return slot;
     }
 
@@ -190,6 +207,7 @@ struct CorvidM1 : App {
         beep(200.f);
         free_list.push_back(slot);
         --n_live; ++n_dead;
+        ++hud_deaths_tick;
     }
 
     // ---------------------------------------------------------------------------
@@ -273,6 +291,32 @@ struct CorvidM1 : App {
     void onAnimate(double dt_d) override {
         float dt = float(dt_d);
         sim_time += dt;
+
+        // --- HUD sampling (1 Hz) ---
+        hud_sample_acc += dt;
+        if (hud_sample_acc >= 1.f) {
+            hud_sample_acc -= 1.f;
+            // avg energy over live agents
+            float esum = 0.f; int ec = 0;
+            for (int i = 0; i < N_POOL; ++i)
+                if (pool[i].live) { esum += pool[i].energy; ++ec; }
+            float avg_e = ec > 0 ? esum / float(ec) : 0.f;
+            // avg novelty over place grid
+            float nsum = 0.f;
+            for (auto& pl : places) nsum += pl.novelty_score;
+            float avg_nov = nsum / float(PLACE_GRID_CELLS);
+
+            h_population.push(float(n_live));
+            h_avg_energy.push(avg_e);
+            h_births.push(float(hud_births_tick));
+            h_deaths.push(float(hud_deaths_tick));
+            h_novelty.push(avg_nov);
+#ifdef CORVID_USE_RAVENNET
+            h_ravenms.push(brain.last_ms);
+#endif
+            hud_births_tick = 0;
+            hud_deaths_tick = 0;
+        }
 
 #ifdef CORVID_USE_RAVENNET
         // Decay action bias validity (spec §2.3.1: zeroes after 200 ms)
@@ -783,6 +827,61 @@ struct CorvidM1 : App {
 
         // --- GUI ---
         gui.draw(g);
+
+        // --- Analysis window (ImGui, same frame as ControlGUI) ---
+        ImGui::SetNextWindowPos({float(width()) - 320.f, 0.f}, ImGuiCond_Once);
+        ImGui::SetNextWindowSize({320.f, 460.f}, ImGuiCond_Once);
+        ImGui::Begin("Analysis", nullptr,
+                     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+
+        ImGui::TextColored({0.6f,1.f,0.6f,1.f}, "Population");
+        ImGui::Text("Live: %d  Born: %d  Dead: %d", n_live, n_born, n_dead);
+        ImGui::Text("Sim time: %.1f s", sim_time);
+        ImGui::PlotLines("##pop",  h_population.data(), HIST, h_population.offset(),
+                         nullptr, 0.f, float(N_POOL), {300.f, 50.f});
+
+        ImGui::Spacing();
+        ImGui::TextColored({1.f,0.9f,0.4f,1.f}, "Avg Energy");
+        ImGui::PlotLines("##enrg", h_avg_energy.data(), HIST, h_avg_energy.offset(),
+                         nullptr, 0.f, 1.f, {300.f, 40.f});
+
+        ImGui::Spacing();
+        ImGui::TextColored({0.4f,0.9f,1.f,1.f}, "Births / s");
+        ImGui::PlotHistogram("##brt", h_births.data(), HIST, h_births.offset(),
+                             nullptr, 0.f, 8.f, {300.f, 40.f});
+
+        ImGui::Spacing();
+        ImGui::TextColored({1.f,0.4f,0.4f,1.f}, "Deaths / s");
+        ImGui::PlotHistogram("##dth", h_deaths.data(), HIST, h_deaths.offset(),
+                             nullptr, 0.f, 8.f, {300.f, 40.f});
+
+        ImGui::Spacing();
+        ImGui::TextColored({0.8f,0.5f,1.f,1.f}, "Place Novelty (avg)");
+        ImGui::PlotLines("##nov", h_novelty.data(), HIST, h_novelty.offset(),
+                         nullptr, 0.f, 0.5f, {300.f, 40.f});
+
+#ifdef CORVID_USE_RAVENNET
+        ImGui::Spacing();
+        ImGui::TextColored({1.f,0.7f,0.2f,1.f}, "RavenNet fwd ms");
+        ImGui::Text("Last: %.2f ms  Budget: 3.0 ms", brain.last_ms);
+        ImGui::PlotLines("##rnn", h_ravenms.data(), HIST, h_ravenms.offset(),
+                         nullptr, 0.f, 5.f, {300.f, 40.f});
+        ImGui::SameLine();
+        if (brain.last_ms > 3.f)
+            ImGui::TextColored({1.f,0.2f,0.2f,1.f}, " OVER BUDGET");
+#endif
+
+        // Memory ring stats
+        ImGui::Spacing();
+        ImGui::TextColored({0.7f,0.8f,1.f,1.f}, "Memory Rings");
+        int total_mems = 0;
+        for (int i = 0; i < N_POOL; ++i)
+            if (pool[i].live) total_mems += mem_rings[i].size();
+        ImGui::Text("Total stored: %d  Avg: %.1f/agent",
+                    total_mems,
+                    n_live > 0 ? float(total_mems)/float(n_live) : 0.f);
+
+        ImGui::End();
     }
 
     // ---------------------------------------------------------------------------
