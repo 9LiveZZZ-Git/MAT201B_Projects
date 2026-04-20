@@ -282,7 +282,8 @@ struct CorvidM1 : App {
 #ifdef CORVID_USE_RAVENNET
         gui << w_action;
 #endif
-        gui.init();
+        gui.init(0, 0, false);  // don't manage ImGui frame — we do it manually
+        imguiInit();
     }
 
     // ---------------------------------------------------------------------------
@@ -825,63 +826,63 @@ struct CorvidM1 : App {
             g.popMatrix();
         }
 
-        // --- GUI ---
-        gui.draw(g);
+        // --- GUI + Analysis: both in one manual ImGui frame ---
+        imguiBeginFrame();
+        gui.draw(g);  // ControlGUI panel (beginPanel/endPanel — no frame management)
 
-        // --- Analysis window (ImGui, same frame as ControlGUI) ---
-        ImGui::SetNextWindowPos({float(width()) - 320.f, 0.f}, ImGuiCond_Once);
-        ImGui::SetNextWindowSize({320.f, 460.f}, ImGuiCond_Once);
+        ImGui::SetNextWindowPos({0.f, 370.f}, ImGuiCond_Always);
+        ImGui::SetNextWindowSize({300.f, 460.f}, ImGuiCond_Always);
         ImGui::Begin("Analysis", nullptr,
                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+        drawAnalysis();
+        ImGui::End();
 
+        imguiEndFrame();
+        imguiDraw();
+    }
+
+    // ---------------------------------------------------------------------------
+    // drawAnalysis — called via gui.drawFunction inside the ControlGUI frame
+    // ---------------------------------------------------------------------------
+    void drawAnalysis() {
+        float w = ImGui::GetContentRegionAvail().x;
         ImGui::TextColored({0.6f,1.f,0.6f,1.f}, "Population");
-        ImGui::Text("Live: %d  Born: %d  Dead: %d", n_live, n_born, n_dead);
-        ImGui::Text("Sim time: %.1f s", sim_time);
-        ImGui::PlotLines("##pop",  h_population.data(), HIST, h_population.offset(),
-                         nullptr, 0.f, float(N_POOL), {300.f, 50.f});
+        ImGui::Text("Live: %d  Born: %d  Dead: %d  t=%.1fs", n_live, n_born, n_dead, sim_time);
+        ImGui::PlotLines("##pop", h_population.data(), HIST, h_population.offset(),
+                         nullptr, 0.f, float(N_POOL), {w, 40.f});
 
-        ImGui::Spacing();
         ImGui::TextColored({1.f,0.9f,0.4f,1.f}, "Avg Energy");
         ImGui::PlotLines("##enrg", h_avg_energy.data(), HIST, h_avg_energy.offset(),
-                         nullptr, 0.f, 1.f, {300.f, 40.f});
+                         nullptr, 0.f, 1.f, {w, 35.f});
 
-        ImGui::Spacing();
-        ImGui::TextColored({0.4f,0.9f,1.f,1.f}, "Births / s");
+        ImGui::TextColored({0.4f,0.9f,1.f,1.f}, "Births/s");
         ImGui::PlotHistogram("##brt", h_births.data(), HIST, h_births.offset(),
-                             nullptr, 0.f, 8.f, {300.f, 40.f});
+                             nullptr, FLT_MAX, FLT_MAX, {w, 28.f});
 
-        ImGui::Spacing();
-        ImGui::TextColored({1.f,0.4f,0.4f,1.f}, "Deaths / s");
+        ImGui::TextColored({1.f,0.4f,0.4f,1.f}, "Deaths/s");
         ImGui::PlotHistogram("##dth", h_deaths.data(), HIST, h_deaths.offset(),
-                             nullptr, 0.f, 8.f, {300.f, 40.f});
+                             nullptr, FLT_MAX, FLT_MAX, {w, 28.f});
 
-        ImGui::Spacing();
-        ImGui::TextColored({0.8f,0.5f,1.f,1.f}, "Place Novelty (avg)");
+        ImGui::TextColored({0.8f,0.5f,1.f,1.f}, "Place Novelty");
         ImGui::PlotLines("##nov", h_novelty.data(), HIST, h_novelty.offset(),
-                         nullptr, 0.f, 0.5f, {300.f, 40.f});
+                         nullptr, 0.f, 0.5f, {w, 35.f});
 
 #ifdef CORVID_USE_RAVENNET
-        ImGui::Spacing();
-        ImGui::TextColored({1.f,0.7f,0.2f,1.f}, "RavenNet fwd ms");
-        ImGui::Text("Last: %.2f ms  Budget: 3.0 ms", brain.last_ms);
-        ImGui::PlotLines("##rnn", h_ravenms.data(), HIST, h_ravenms.offset(),
-                         nullptr, 0.f, 5.f, {300.f, 40.f});
+        ImGui::TextColored({1.f,0.7f,0.2f,1.f}, "RavenNet ms");
         ImGui::SameLine();
-        if (brain.last_ms > 3.f)
-            ImGui::TextColored({1.f,0.2f,0.2f,1.f}, " OVER BUDGET");
+        ImGui::Text("last=%.2f", brain.last_ms);
+        if (brain.last_ms > 3.f) { ImGui::SameLine(); ImGui::TextColored({1.f,0.2f,0.2f,1.f}, "OVER"); }
+        ImGui::PlotLines("##rnn", h_ravenms.data(), HIST, h_ravenms.offset(),
+                         nullptr, 0.f, 5.f, {w, 35.f});
 #endif
 
-        // Memory ring stats
-        ImGui::Spacing();
-        ImGui::TextColored({0.7f,0.8f,1.f,1.f}, "Memory Rings");
         int total_mems = 0;
         for (int i = 0; i < N_POOL; ++i)
             if (pool[i].live) total_mems += mem_rings[i].size();
-        ImGui::Text("Total stored: %d  Avg: %.1f/agent",
-                    total_mems,
-                    n_live > 0 ? float(total_mems)/float(n_live) : 0.f);
-
-        ImGui::End();
+        ImGui::TextColored({0.7f,0.8f,1.f,1.f}, "MemRings:");
+        ImGui::SameLine();
+        ImGui::Text("%d total  %.1f/agent",
+                    total_mems, n_live > 0 ? float(total_mems)/float(n_live) : 0.f);
     }
 
     // ---------------------------------------------------------------------------
