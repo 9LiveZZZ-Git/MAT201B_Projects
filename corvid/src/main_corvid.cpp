@@ -19,6 +19,7 @@
 #include "cognition/Perception.hpp"
 #ifdef CORVID_USE_RAVENNET
 #include "cognition/RavenBrain.hpp"
+#include "training/PPOBuffer.hpp"
 #endif
 #include "environment/AcornPlant.hpp"
 #include "environment/BoulderObstacle.hpp"
@@ -83,11 +84,20 @@ struct CorvidM1 : App {
     // --- M3: RavenNet trunk + per-agent action biases ---
 #ifdef CORVID_USE_RAVENNET
     RavenBrain brain;
-    // action_biases[slot][6]: biases per force (align,sep,cohere,pred,food,obs)
-    // validity decays linearly over 200 ms then zeroes (spec §2.3.1)
     std::array<std::array<float, 6>, N_POOL> action_biases{};
-    std::array<float, N_POOL> bias_age{};  // seconds since last forward for this slot
+    std::array<float, N_POOL> bias_age{};
     Parameter w_action{"ActionBias", "Forces", 2.0f, 0.f, 4.f};
+
+    // --- M4: PPO rollout buffer + per-agent prev-step storage ---
+    PPOBuffer<N_POOL>              ppo_buf;
+    std::array<float, N_POOL * ENC_DIM_CONST> prev_obs{};   // last obs per slot
+    std::array<int,   N_POOL>                 prev_action{};
+    std::array<float, N_POOL>                 prev_value{};
+    std::array<float, N_POOL>                 prev_logprob{};
+    std::array<bool,  N_POOL>                 has_prev{};
+    std::array<float, N_POOL>                 pending_reward{};  // since last tick
+    float ppo_reward_acc = 0.f;
+    int   ppo_reward_n   = 0;
 #endif
 
     // --- entities ---
@@ -130,6 +140,9 @@ struct CorvidM1 : App {
     };
     RollingBuf h_population, h_avg_energy, h_births, h_deaths,
                h_novelty, h_ravenms;
+#ifdef CORVID_USE_RAVENNET
+    RollingBuf h_ppo_kl, h_policy_loss, h_value_loss, h_avg_reward;
+#endif
     float hud_sample_acc = 0.f;    // accumulates dt until 1s sample
     int   hud_births_tick = 0, hud_deaths_tick = 0;  // since last sample
 
@@ -185,6 +198,11 @@ struct CorvidM1 : App {
         a.flash_kind   = 0;   // green birth flash
         a.nav.pos(Vec3d(pos.x, pos.y, pos.z));
         vel[slot] = Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()).normalize() * 0.8f;
+#ifdef CORVID_USE_RAVENNET
+        pending_reward[slot] = 0.f;
+        has_prev[slot]       = false;
+        ppo_buf.reset_agent(slot);
+#endif
         ++n_live; ++n_born;
         ++hud_births_tick;
         return slot;
@@ -205,6 +223,11 @@ struct CorvidM1 : App {
                         float(a.nav.pos().z));
         writePlace(places, p, MK_DEATH_WITNESSED, -0.7f, HALF_W);
         beep(200.f);
+#ifdef CORVID_USE_RAVENNET
+        pending_reward[slot] -= 2.0f;
+        ppo_buf.mark_done(slot);
+        has_prev[slot] = false;
+#endif
         free_list.push_back(slot);
         --n_live; ++n_dead;
         ++hud_deaths_tick;
@@ -374,6 +397,9 @@ struct CorvidM1 : App {
                          float(hawk->position.z));
                 writePlace(places, hp, MK_PREDATOR, -0.9f, HALF_W);
                 beep(180.f);
+#ifdef CORVID_USE_RAVENNET
+                pending_reward[hit] -= 0.5f;
+#endif
                 // write predator-strike memory for hit agent
                 {
                     int pidx = placeIndex(hp, HALF_W);
@@ -507,6 +533,9 @@ struct CorvidM1 : App {
                     if (res.entity_consumed) {
                         writePlace(places, pos_i, res.memory_kind, res.valence, HALF_W);
                         beep(600.f);
+#ifdef CORVID_USE_RAVENNET
+                        pending_reward[i] += 1.0f;
+#endif
                         // food memory
                         Memory fm;
                         fm.timestamp = sim_time;
@@ -665,6 +694,23 @@ struct CorvidM1 : App {
             }
 
 #ifdef CORVID_USE_RAVENNET
+            // M4: collect transitions from previous tick into PPO buffer
+            for (int j = 0; j < N_POOL; ++j) {
+                if (!pool[j].live || !has_prev[j]) continue;
+                pending_reward[j] += 0.005f;  // survival bonus per tick
+                StepRecord rec;
+                const float* po = &prev_obs[j * ENC_DIM_CONST];
+                std::copy(po, po + ENC_DIM_CONST, rec.obs);
+                rec.action      = prev_action[j];
+                rec.reward      = pending_reward[j];
+                rec.value       = prev_value[j];
+                rec.logprob     = prev_logprob[j];
+                rec.done        = 0.f;
+                rec.adapter_idx = int64_t(j);
+                ppo_buf.push(j, rec);
+                pending_reward[j] = 0.f;
+            }
+
             // Batch all live obs and run RavenNet forward
             // Collect encoded obs and slot indices
             std::vector<float>   obs_batch;
@@ -696,9 +742,40 @@ struct CorvidM1 : App {
                               biases.data(), values.data());
                 for (int k = 0; k < Nb; ++k) {
                     int s = live_slots[k];
+                    const float* logits = &biases[k * brain.cfg.d_action];
                     for (int d = 0; d < brain.cfg.d_action; ++d)
-                        action_biases[s][d] = biases[k * brain.cfg.d_action + d];
+                        action_biases[s][d] = logits[d];
                     bias_age[s] = 0.f;
+
+                    // M4: store prev obs/action/value/logprob for next tick
+                    float* po = &prev_obs[s * ENC_DIM_CONST];
+                    std::copy(obs_batch.begin() + k * ENC_DIM,
+                              obs_batch.begin() + k * ENC_DIM + ENC_DIM_CONST, po);
+                    int act = sample_softmax(logits, brain.cfg.d_action,
+                                             rnd::uniform());
+                    prev_action[s]  = act;
+                    prev_value[s]   = values[k];
+                    prev_logprob[s] = log_softmax_action(logits, act, brain.cfg.d_action);
+                    has_prev[s]     = true;
+                }
+
+                // M4: run PPO train step if any rollout is full
+                if (ppo_buf.any_ready()) {
+                    std::array<float, N_POOL> bootstrap{};
+                    for (int j = 0; j < N_POOL; ++j)
+                        if (pool[j].live && has_prev[j])
+                            bootstrap[j] = prev_value[j];
+                    auto batch = ppo_buf.compute_batch(bootstrap.data());
+                    if (batch.N >= 4) {
+                        brain.train_step(batch);
+                        h_ppo_kl.push(brain.last_kl);
+                        h_policy_loss.push(brain.last_policy_loss);
+                        h_value_loss.push(brain.last_value_loss);
+                        float avg_r = 0.f;
+                        for (float r : batch.returns) avg_r += r;
+                        h_avg_reward.push(batch.N > 0 ? avg_r / float(batch.N) : 0.f);
+                    }
+                    ppo_buf.drain_ready();
                 }
             }
 #endif
@@ -831,7 +908,7 @@ struct CorvidM1 : App {
         gui.draw(g);  // ControlGUI panel (beginPanel/endPanel — no frame management)
 
         ImGui::SetNextWindowPos({0.f, 370.f}, ImGuiCond_Always);
-        ImGui::SetNextWindowSize({300.f, 460.f}, ImGuiCond_Always);
+        ImGui::SetNextWindowSize({300.f, 600.f}, ImGuiCond_Always);
         ImGui::Begin("Analysis", nullptr,
                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
         drawAnalysis();
@@ -874,6 +951,21 @@ struct CorvidM1 : App {
         if (brain.last_ms > 3.f) { ImGui::SameLine(); ImGui::TextColored({1.f,0.2f,0.2f,1.f}, "OVER"); }
         ImGui::PlotLines("##rnn", h_ravenms.data(), HIST, h_ravenms.offset(),
                          nullptr, 0.f, 5.f, {w, 35.f});
+#endif
+
+#ifdef CORVID_USE_RAVENNET
+        ImGui::Separator();
+        ImGui::TextColored({0.4f, 1.f, 0.8f, 1.f}, "PPO Training");
+        ImGui::Text("KL=%.4f  PL=%.4f  VL=%.4f",
+                    brain.last_kl, brain.last_policy_loss, brain.last_value_loss);
+        if (brain.last_kl > 0.02f)
+            ImGui::TextColored({1.f, 0.3f, 0.3f, 1.f}, "HIGH KL!");
+        ImGui::PlotLines("##kl", h_ppo_kl.data(), HIST, h_ppo_kl.offset(),
+                         "KL", 0.f, 0.05f, {w, 28.f});
+        ImGui::PlotLines("##ploss", h_policy_loss.data(), HIST, h_policy_loss.offset(),
+                         "PolicyLoss", FLT_MAX, FLT_MAX, {w, 28.f});
+        ImGui::PlotLines("##avgret", h_avg_reward.data(), HIST, h_avg_reward.offset(),
+                         "AvgReturn", FLT_MAX, FLT_MAX, {w, 28.f});
 #endif
 
         int total_mems = 0;
