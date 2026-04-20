@@ -16,6 +16,9 @@
 #include "core/Place.hpp"
 #include "core/SpatialHash.hpp"
 #include "cognition/Perception.hpp"
+#ifdef CORVID_USE_RAVENNET
+#include "cognition/RavenBrain.hpp"
+#endif
 #include "environment/AcornPlant.hpp"
 #include "environment/BoulderObstacle.hpp"
 #include "environment/HawkPredator.hpp"
@@ -75,6 +78,16 @@ struct CorvidM1 : App {
     std::array<MemoryRing<256>, N_POOL> mem_rings{};
     FixedEncoder encoder;
     int cognition_counter = 0;  // increments each frame; fires perception at 5 Hz
+
+    // --- M3: RavenNet trunk + per-agent action biases ---
+#ifdef CORVID_USE_RAVENNET
+    RavenBrain brain;
+    // action_biases[slot][6]: biases per force (align,sep,cohere,pred,food,obs)
+    // validity decays linearly over 200 ms then zeroes (spec §2.3.1)
+    std::array<std::array<float, 6>, N_POOL> action_biases{};
+    std::array<float, N_POOL> bias_age{};  // seconds since last forward for this slot
+    Parameter w_action{"ActionBias", "Forces", 2.0f, 0.f, 4.f};
+#endif
 
     // --- entities ---
     std::vector<std::unique_ptr<Entity>> entities;
@@ -188,6 +201,13 @@ struct CorvidM1 : App {
 
         gam::sampleRate(audioIO().framesPerSecond());
         encoder.init();
+#ifdef CORVID_USE_RAVENNET
+        {
+            RavenNetConfig cfg;
+            cfg.n_agents = N_POOL;
+            brain.init(cfg);
+        }
+#endif
 
         // Build tetrahedron mesh once
         addTetrahedron(tetra_m);
@@ -241,6 +261,9 @@ struct CorvidM1 : App {
         gui << w_align << w_sep << w_cohere
             << w_predator << w_food << w_obstacle
             << e_drain << view_r << max_spd;
+#ifdef CORVID_USE_RAVENNET
+        gui << w_action;
+#endif
         gui.init();
     }
 
@@ -250,6 +273,16 @@ struct CorvidM1 : App {
     void onAnimate(double dt_d) override {
         float dt = float(dt_d);
         sim_time += dt;
+
+#ifdef CORVID_USE_RAVENNET
+        // Decay action bias validity (spec §2.3.1: zeroes after 200 ms)
+        for (int i = 0; i < N_POOL; ++i) {
+            if (!pool[i].live) continue;
+            bias_age[i] += dt;
+            if (bias_age[i] > 0.2f)
+                action_biases[i] = {};
+        }
+#endif
 
         const float vr     = view_r;
         const float vr2    = vr * vr;
@@ -382,13 +415,24 @@ struct CorvidM1 : App {
                     f_obs -= d.normalize() / std::max(std::sqrt(d2), 0.05f);
             }
 
-            // --- accumulate and steer ---
+            // --- accumulate and steer (M3: action biases blend in per spec §2.3.1) ---
+#ifdef CORVID_USE_RAVENNET
+            const float* ab = action_biases[i].data();
+            const float  wav = float(w_action);
+            Vec3f steer = f_align  * (wa + wav * ab[0])
+                        + f_sep    * (ws + wav * ab[1])
+                        + f_cohere * (wc + wav * ab[2])
+                        + f_pred   * (wp + wav * ab[3])
+                        + f_food   * (wf + wav * ab[4])
+                        + f_obs    * (wo + wav * ab[5]);
+#else
             Vec3f steer = f_align  * wa
                         + f_sep    * ws
                         + f_cohere * wc
                         + f_pred   * wp
                         + f_food   * wf
                         + f_obs    * wo;
+#endif
 
             vel[i] += steer * dt;
             float spd = vel[i].mag();
@@ -574,6 +618,45 @@ struct CorvidM1 : App {
                 // Decay ring salience
                 mem_rings[i].decaySalience(0.98f);
             }
+
+#ifdef CORVID_USE_RAVENNET
+            // Batch all live obs and run RavenNet forward
+            // Collect encoded obs and slot indices
+            std::vector<float>   obs_batch;
+            std::vector<int64_t> slot_idx;
+            std::vector<int>     live_slots;
+            obs_batch.reserve(n_live * ENC_DIM);
+            slot_idx.reserve(n_live);
+            live_slots.reserve(n_live);
+
+            for (int j = 0; j < N_POOL; ++j) {
+                if (!pool[j].live) continue;
+                // Use latest memory vec if ring has entries, else zeros
+                int mi = mem_rings[j].size() > 0 ? (mem_rings[j].size() - 1) : -1;
+                if (mi >= 0) {
+                    const float* v = mem_rings[j].get(mi).vec;
+                    obs_batch.insert(obs_batch.end(), v, v + ENC_DIM);
+                } else {
+                    obs_batch.insert(obs_batch.end(), ENC_DIM, 0.f);
+                }
+                slot_idx.push_back(int64_t(j));
+                live_slots.push_back(j);
+            }
+
+            if (!live_slots.empty()) {
+                int Nb = int(live_slots.size());
+                std::vector<float> biases(Nb * brain.cfg.d_action);
+                std::vector<float> values(Nb);
+                brain.forward(obs_batch.data(), slot_idx.data(), Nb,
+                              biases.data(), values.data());
+                for (int k = 0; k < Nb; ++k) {
+                    int s = live_slots[k];
+                    for (int d = 0; d < brain.cfg.d_action; ++d)
+                        action_biases[s][d] = biases[k * brain.cfg.d_action + d];
+                    bias_age[s] = 0.f;
+                }
+            }
+#endif
         }
     }
 

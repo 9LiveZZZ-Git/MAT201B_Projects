@@ -171,14 +171,30 @@ if(CORVID_USE_TORCH)
 endif()
 
 # --------------------------------------------------------------------------
-# corvid_m1 — M1/M2 alpha demo
+# corvid_m1 — M1/M2/M3 alpha demo
 # --------------------------------------------------------------------------
-add_executable(corvid_m1
-    src/main_corvid.cpp
-    cognition/Perception.cpp
-)
+set(_m1_sources src/main_corvid.cpp cognition/Perception.cpp)
+if(CORVID_USE_TORCH)
+    list(APPEND _m1_sources cognition/RavenBrain.cpp)
+endif()
+add_executable(corvid_m1 ${_m1_sources})
 target_link_libraries(corvid_m1 PRIVATE al)
 corvid_target_flags(corvid_m1)
+
+if(CORVID_USE_TORCH)
+    target_link_libraries(corvid_m1 PRIVATE "${TORCH_LIBRARIES}")
+    target_include_directories(corvid_m1 PRIVATE ${TORCH_INCLUDE_DIRS})
+    target_compile_definitions(corvid_m1 PRIVATE CORVID_USE_RAVENNET)
+    set_property(TARGET corvid_m1 PROPERTY CXX_STANDARD 17)
+    if(MSVC)
+        target_compile_options(corvid_m1 PRIVATE /bigobj)
+        file(GLOB _m1_torch_dlls "${CORVID_TORCH_PREFIX}/../../../lib/*.dll")
+        list(FILTER _m1_torch_dlls EXCLUDE REGEX "torch_python\\.dll$")
+        add_custom_command(TARGET corvid_m1 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${_m1_torch_dlls} $<TARGET_FILE_DIR:corvid_m1>)
+    endif()
+endif()
 
 # --------------------------------------------------------------------------
 # corvid_m2_test — Kahan EMA unit tests (M2 acceptance, spec §3.10.6)
