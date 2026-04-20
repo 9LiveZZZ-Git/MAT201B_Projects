@@ -1,0 +1,21 @@
+# Corvid dependency pins
+# Update this file whenever a dependency SHA/version changes.
+
+[allolib]
+sha = "81d8dfdf7b301ec7eff730bd6e7b0a87253a8375"
+path = "../../allolib"
+
+[llama_cpp]
+tag = "b8851"
+repo = "https://github.com/ggerganov/llama.cpp"
+ggml_cuda = false    # CPU-only; both tiers run on 128GB DDR5, -ngl 0
+
+[models]
+tier_a = "unsloth/gemma-4-E2B-it-GGUF / gemma-4-E2B-it-Q4_K_M.gguf"
+tier_b = "unsloth/gemma-4-31B-it-GGUF / gemma-4-31B-it-Q4_K_M.gguf"
+
+[build]
+os = "Ubuntu 24.04 (WSL2)"
+cuda = "12.6"
+gcc = "13"
+cmake_min = "3.24"

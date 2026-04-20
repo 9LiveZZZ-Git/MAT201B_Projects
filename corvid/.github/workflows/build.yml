@@ -1,0 +1,47 @@
+name: corvid-build
+
+on:
+  push:
+    paths:
+      - 'MAT201B_projects/corvid/**'
+      - '.github/workflows/build.yml'
+  pull_request:
+    paths:
+      - 'MAT201B_projects/corvid/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            libglfw3-dev libglew-dev \
+            libasound2-dev librtmidi-dev \
+            libsndfile1-dev libzstd-dev \
+            libfreetype-dev libfontconfig-dev
+
+      - name: Configure (LLM OFF for CI — no weights)
+        run: |
+          cmake \
+            -S MAT201B_projects/corvid \
+            -B corvid_build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCORVID_USE_LLM=OFF
+
+      - name: Build all targets
+        run: ninja -C corvid_build corvid_p1 corvid_p2 corvid_p3
+
+      - name: Verify executables exist
+        run: |
+          test -f corvid_build/corvid_p1
+          test -f corvid_build/corvid_p2
+          test -f corvid_build/corvid_p3

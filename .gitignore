@@ -1,0 +1,43 @@
+# Build output
+build/
+bin/
+setup/
+assets/
+*.exe
+*.lib
+*.dll
+*.pdb
+*.ilk
+*.exp
+*.obj
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+cmake_log.txt
+Makefile
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.suo
+*.user
+
+# Visual Studio
+.vs/
+x64/
+Debug/
+Release/
+
+# macOS
+.DS_Store
+
+# Audio/misc
+*.wav
+*.aif
+*.aiff
+
+# Corvid build + vendored llama.cpp (clone: git clone --depth 1 --branch b8851 https://github.com/ggerganov/llama.cpp corvid/vendor/llama.cpp)
+corvid/build/
+corvid/vendor/llama.cpp/
