@@ -98,6 +98,11 @@ struct CorvidM1 : App {
     std::array<float, N_POOL>                 pending_reward{};  // since last tick
     float ppo_reward_acc = 0.f;
     int   ppo_reward_n   = 0;
+
+    // --- M5: place affinity + teaching window ---
+    static constexpr float T_TEACH = 30.f;  // juvenile teaching window (s)
+    std::array<std::array<float, PLACE_GRID_CELLS>, N_POOL> place_affinity{};
+    std::array<float, N_POOL> teach_until{};  // sim_time when teaching window ends
 #endif
 
     // --- entities ---
@@ -199,9 +204,11 @@ struct CorvidM1 : App {
         a.nav.pos(Vec3d(pos.x, pos.y, pos.z));
         vel[slot] = Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()).normalize() * 0.8f;
 #ifdef CORVID_USE_RAVENNET
-        pending_reward[slot] = 0.f;
-        has_prev[slot]       = false;
+        pending_reward[slot]  = 0.f;
+        has_prev[slot]        = false;
         ppo_buf.reset_agent(slot);
+        place_affinity[slot]  = {};
+        teach_until[slot]     = sim_time + T_TEACH;
 #endif
         ++n_live; ++n_born;
         ++hud_births_tick;
@@ -399,6 +406,14 @@ struct CorvidM1 : App {
                 beep(180.f);
 #ifdef CORVID_USE_RAVENNET
                 pending_reward[hit] -= 0.5f;
+                // M5: aversion to this predator location
+                {
+                    Vec3f hp2(float(hawk->position.x),
+                              float(hawk->position.y),
+                              float(hawk->position.z));
+                    int pidx = placeIndex(hp2, HALF_W);
+                    place_affinity[hit][pidx] = place_affinity[hit][pidx] * 0.9f - 0.1f;
+                }
 #endif
                 // write predator-strike memory for hit agent
                 {
@@ -505,6 +520,30 @@ struct CorvidM1 : App {
                         + f_obs    * wo;
 #endif
 
+#ifdef CORVID_USE_RAVENNET
+            // M5: place-affinity bias — attract/repel toward high-affinity cells
+            {
+                Vec3f f_place{0,0,0};
+                float best_pos = 0.f, best_neg = 0.f;
+                int   best_pos_idx = -1, best_neg_idx = -1;
+                for (int p = 0; p < PLACE_GRID_CELLS; ++p) {
+                    float aff = place_affinity[i][p];
+                    if (aff > best_pos) { best_pos = aff; best_pos_idx = p; }
+                    if (aff < best_neg) { best_neg = aff; best_neg_idx = p; }
+                }
+                if (best_pos_idx >= 0) {
+                    Vec3f d = toroidalDelta(pos_i, places[best_pos_idx].center);
+                    float dm = d.mag();
+                    if (dm > 0.1f) f_place += (d / dm) * best_pos * 0.5f;
+                }
+                if (best_neg_idx >= 0) {
+                    Vec3f d = toroidalDelta(pos_i, places[best_neg_idx].center);
+                    float dm = d.mag();
+                    if (dm > 0.1f) f_place -= (d / dm) * (-best_neg) * 0.5f;
+                }
+                steer += f_place;
+            }
+#endif
             vel[i] += steer * dt;
             float spd = vel[i].mag();
             if (spd > ms) vel[i] = vel[i] * (ms / spd);
@@ -535,6 +574,11 @@ struct CorvidM1 : App {
                         beep(600.f);
 #ifdef CORVID_USE_RAVENNET
                         pending_reward[i] += 1.0f;
+                        // M5: reinforce place affinity toward this food location
+                        {
+                            int pidx = placeIndex(pos_i, HALF_W);
+                            place_affinity[i][pidx] = place_affinity[i][pidx] * 0.9f + 0.1f;
+                        }
 #endif
                         // food memory
                         Memory fm;
@@ -614,6 +658,12 @@ struct CorvidM1 : App {
                 bm.salience  = 0.7f;
                 ObsVec bobs{}; encoder.encode(bobs.v, bm.vec);
                 mem_rings[s].push(bm);
+#ifdef CORVID_USE_RAVENNET
+                // M5: inherit adapter (LoRA B row) and place affinity from parent
+                brain.inherit_adapter(child, s);
+                for (int p = 0; p < PLACE_GRID_CELLS; ++p)
+                    place_affinity[child][p] = place_affinity[s][p] * 0.8f;
+#endif
             }
         }
 
@@ -704,12 +754,13 @@ struct CorvidM1 : App {
                 StepRecord rec;
                 const float* po = &prev_obs[j * ENC_DIM_CONST];
                 std::copy(po, po + ENC_DIM_CONST, rec.obs);
-                rec.action      = prev_action[j];
-                rec.reward      = pending_reward[j];
-                rec.value       = prev_value[j];
-                rec.logprob     = prev_logprob[j];
-                rec.done        = 0.f;
-                rec.adapter_idx = int64_t(j);
+                rec.action          = prev_action[j];
+                rec.reward          = pending_reward[j];
+                rec.value           = prev_value[j];
+                rec.logprob         = prev_logprob[j];
+                rec.done            = 0.f;
+                rec.adapter_idx     = int64_t(j);
+                rec.teaching_scale  = (sim_time - pool[j].birth_t) < T_TEACH ? 3.f : 1.f;
                 ppo_buf.push(j, rec);
                 pending_reward[j] = 0.f;
             }
@@ -780,9 +831,13 @@ struct CorvidM1 : App {
                         h_avg_reward.push(avg_ret);
                         if (FILE* f = std::fopen("ppo_learning.log", "a")) {
                             static int step = 0;
-                            std::fprintf(f, "%d %.4f %.4f %.4f %.4f %d\n",
+                            // count juvenile samples in batch
+                            int juv_n = 0;
+                            for (float ts : batch.teaching_scale)
+                                if (ts > 1.5f) ++juv_n;
+                            std::fprintf(f, "%d %.4f %.4f %.4f %.4f %d juv=%d\n",
                                 ++step, sim_time, avg_ret,
-                                brain.last_kl, brain.last_policy_loss, batch.N);
+                                brain.last_kl, brain.last_policy_loss, batch.N, juv_n);
                             std::fclose(f);
                         }
                     }
@@ -919,7 +974,7 @@ struct CorvidM1 : App {
         gui.draw(g);  // ControlGUI panel (beginPanel/endPanel — no frame management)
 
         ImGui::SetNextWindowPos({0.f, 370.f}, ImGuiCond_Always);
-        ImGui::SetNextWindowSize({300.f, 600.f}, ImGuiCond_Always);
+        ImGui::SetNextWindowSize({300.f, 660.f}, ImGuiCond_Always);
         ImGui::Begin("Analysis", nullptr,
                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
         drawAnalysis();
@@ -977,6 +1032,20 @@ struct CorvidM1 : App {
                          "PolicyLoss", FLT_MAX, FLT_MAX, {w, 28.f});
         ImGui::PlotLines("##avgret", h_avg_reward.data(), HIST, h_avg_reward.offset(),
                          "AvgReturn", FLT_MAX, FLT_MAX, {w, 28.f});
+
+        // M5 live stats
+        ImGui::Separator();
+        ImGui::TextColored({0.5f, 1.f, 0.5f, 1.f}, "M5 Inheritance");
+        int juveniles = 0;
+        float aff_sum = 0.f; int aff_n = 0;
+        for (int ii = 0; ii < N_POOL; ++ii) {
+            if (!pool[ii].live) continue;
+            if ((sim_time - pool[ii].birth_t) < T_TEACH) ++juveniles;
+            for (int p = 0; p < PLACE_GRID_CELLS; ++p)
+                if (place_affinity[ii][p] != 0.f) { aff_sum += std::fabs(place_affinity[ii][p]); ++aff_n; }
+        }
+        ImGui::Text("Juveniles(<30s): %d  AffCells: %d", juveniles, aff_n);
+        if (aff_n > 0) ImGui::Text("AvgAffMag: %.3f", aff_sum / float(aff_n));
 #endif
 
         int total_mems = 0;

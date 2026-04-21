@@ -13,12 +13,13 @@ static constexpr int ENC_DIM_CONST = 64;
 
 // Flat batch produced by PPOBuffer::compute_batch, consumed by RavenBrain::train_step.
 struct TrainBatch {
-    std::vector<float>   obs;           // [N * ENC_DIM_CONST]
-    std::vector<int32_t> actions;       // [N]
-    std::vector<float>   advantages;    // [N] — GAE-normalised
-    std::vector<float>   returns;       // [N] — advantage + value
-    std::vector<float>   old_logprobs;  // [N] — log π_old(a|s)
-    std::vector<int64_t> adapter_idx;   // [N] — adapter slot per sample
+    std::vector<float>   obs;             // [N * ENC_DIM_CONST]
+    std::vector<int32_t> actions;         // [N]
+    std::vector<float>   advantages;      // [N] — GAE-normalised
+    std::vector<float>   returns;         // [N] — advantage + value
+    std::vector<float>   old_logprobs;    // [N] — log π_old(a|s)
+    std::vector<int64_t> adapter_idx;     // [N] — adapter slot per sample
+    std::vector<float>   teaching_scale;  // [N] — M5: 3.0 for juveniles, 1.0 otherwise
     int N = 0;
 };
 
@@ -40,6 +41,12 @@ struct RavenBrain {
     // PPO adapter update (M4). Unfreezes B_all_, runs one PPO gradient step.
     // Returns mean KL(old || new). batch.N must be >= 4.
     float train_step(const TrainBatch& batch);
+
+    // M5: copy parent adapter rows into child slot then add scale-aware Gaussian noise.
+    // If parent_b_slot >= 0, applies block-level uniform crossover before mutation.
+    // sigma_base = 0.01 per spec §3.10.11 (ES midpoint).
+    void inherit_adapter(int child_slot, int parent_a_slot,
+                         int parent_b_slot = -1, float sigma_base = 0.01f);
 
     float last_ms          = 0.f;
     float last_kl          = 0.f;

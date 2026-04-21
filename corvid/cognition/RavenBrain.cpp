@@ -153,6 +153,12 @@ float RavenBrain::train_step(const TrainBatch& b)
                        {b.N}, torch::kFloat32).clone();
     auto old_lp  = torch::from_blob(const_cast<float*>(b.old_logprobs.data()),
                        {b.N}, torch::kFloat32).clone();
+    // M5: teaching window — scale effective advantage by teaching_scale (3× for juveniles)
+    if (!b.teaching_scale.empty()) {
+        auto ts = torch::from_blob(const_cast<float*>(b.teaching_scale.data()),
+                      {b.N}, torch::kFloat32).clone();
+        adv_t = adv_t * ts;
+    }
 
     impl_->net->train();
     impl_->opt->zero_grad();
@@ -197,6 +203,30 @@ float RavenBrain::train_step(const TrainBatch& b)
         std::fclose(f);
     }
     return last_kl;
+}
+
+void RavenBrain::inherit_adapter(int child, int pa, int pb, float sigma_base)
+{
+    if (!impl_) return;
+    torch::NoGradGuard guard;
+
+    // Copy parent_a row into child
+    impl_->net->B_all_[child] = impl_->net->B_all_[pa].clone();
+
+    // Optional block-level crossover: each rank-slice independently from pa or pb
+    if (pb >= 0 && pb != pa) {
+        int rank = impl_->net->cfg_.lora_rank;
+        for (int r = 0; r < rank; ++r) {
+            if (torch::rand({1}).item<float>() < 0.5f)
+                impl_->net->B_all_[child][r] = impl_->net->B_all_[pb][r].clone();
+        }
+    }
+
+    // Scale-aware Gaussian mutation: noise = sigma_base * |B| * N(0,1)
+    auto noise = sigma_base
+                 * impl_->net->B_all_[child].abs()
+                 * torch::randn_like(impl_->net->B_all_[child]);
+    impl_->net->B_all_[child] += noise;
 }
 
 } // namespace corvid

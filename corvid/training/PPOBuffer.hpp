@@ -21,6 +21,7 @@ struct StepRecord {
     float   logprob   = 0.f;    // log π(a|s)
     float   done      = 0.f;    // 1.0 if episode ended this step
     int64_t adapter_idx = 0;
+    float   teaching_scale = 1.f;  // M5: 3.0 during juvenile teaching window
 };
 
 template<int N_POOL, int ROLLOUT = PPO_ROLLOUT>
@@ -85,6 +86,7 @@ public:
                 b.returns.push_back(advs[t] + step.value);
                 b.old_logprobs.push_back(step.logprob);
                 b.adapter_idx.push_back(step.adapter_idx);
+                b.teaching_scale.push_back(step.teaching_scale);
                 ++b.N;
             }
         }
