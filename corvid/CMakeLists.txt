@@ -188,6 +188,9 @@ if(CORVID_USE_TORCH)
     set_property(TARGET corvid_m1 PROPERTY CXX_STANDARD 17)
     if(MSVC)
         target_compile_options(corvid_m1 PRIVATE /bigobj)
+        target_link_options(corvid_m1 PRIVATE
+            /DELAYLOAD:torch.dll /DELAYLOAD:torch_cpu.dll /DELAYLOAD:torch_cuda.dll)
+        target_link_libraries(corvid_m1 PRIVATE delayimp.lib)
         file(GLOB _m1_torch_dlls "${CORVID_TORCH_PREFIX}/../../../lib/*.dll")
         list(FILTER _m1_torch_dlls EXCLUDE REGEX "torch_python\\.dll$")
         add_custom_command(TARGET corvid_m1 POST_BUILD

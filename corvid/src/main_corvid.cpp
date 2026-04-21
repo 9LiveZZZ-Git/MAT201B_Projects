@@ -694,6 +694,9 @@ struct CorvidM1 : App {
             }
 
 #ifdef CORVID_USE_RAVENNET
+            { if (FILE* f = std::fopen("m4_diag.log", "a"))
+              { static int _tc=0; std::fprintf(f, "cog_tick %d n_live=%d\n", ++_tc, n_live); std::fclose(f); } }
+
             // M4: collect transitions from previous tick into PPO buffer
             for (int j = 0; j < N_POOL; ++j) {
                 if (!pool[j].live || !has_prev[j]) continue;
