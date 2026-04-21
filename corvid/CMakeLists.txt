@@ -173,9 +173,15 @@ endif()
 # --------------------------------------------------------------------------
 # corvid_m1 — M1/M2/M3 alpha demo
 # --------------------------------------------------------------------------
-set(_m1_sources src/main_corvid.cpp cognition/Perception.cpp)
+set(_m1_sources
+    src/main_corvid.cpp
+    cognition/Perception.cpp
+    cognition/Reflection.cpp)   # M13-A heuristic fallback — always compiled in
 if(CORVID_USE_TORCH)
     list(APPEND _m1_sources cognition/RavenBrain.cpp)
+endif()
+if(CORVID_USE_LLM)
+    list(APPEND _m1_sources cognition/LlmReflection.cpp)
 endif()
 add_executable(corvid_m1 ${_m1_sources})
 target_link_libraries(corvid_m1 PRIVATE al)
@@ -196,6 +202,18 @@ if(CORVID_USE_TORCH)
         add_custom_command(TARGET corvid_m1 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${_m1_torch_dlls} $<TARGET_FILE_DIR:corvid_m1>)
+    endif()
+endif()
+
+if(CORVID_USE_LLM)
+    target_compile_definitions(corvid_m1 PRIVATE CORVID_USE_LLM)
+    target_link_libraries(corvid_m1 PRIVATE llama)
+    target_include_directories(corvid_m1 PRIVATE
+        ${llama_cpp_SOURCE_DIR}
+        ${llama_cpp_SOURCE_DIR}/include
+        ${llama_cpp_SOURCE_DIR}/ggml/include)
+    if(MSVC)
+        target_compile_options(corvid_m1 PRIVATE /bigobj)
     endif()
 endif()
 

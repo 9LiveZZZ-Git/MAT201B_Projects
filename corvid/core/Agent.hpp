@@ -1,6 +1,8 @@
 #pragma once
 #include "al/io/al_ControlNav.hpp"
 #include "al/math/al_Vec.hpp"
+#include "Goal.hpp"
+#include <cstring>
 
 namespace corvid {
 
@@ -30,6 +32,11 @@ struct Agent {
 
     // Motion primitive (spec §1.4)
     al::Nav   nav;
+
+    // M13-A: reflection goals (written by ReflectionThread, read by sim at frame boundary)
+    GoalEntry goal_stack[MAX_GOALS] = {};
+    int8_t    n_goals               = 0;
+    char      last_reflection[256]  = {};  // raw LLM output for HUD
 
     // Visual helpers (not serialised)
     float flash_timer     = 0.f;    // >0 while birth/death flash active

@@ -21,6 +21,10 @@
 #include "cognition/RavenBrain.hpp"
 #include "training/PPOBuffer.hpp"
 #endif
+#include "cognition/Reflection.hpp"
+#ifdef CORVID_USE_LLM
+#include "cognition/LlmReflection.hpp"
+#endif
 #include "environment/AcornPlant.hpp"
 #include "environment/BoulderObstacle.hpp"
 #include "environment/HawkPredator.hpp"
@@ -103,6 +107,14 @@ struct CorvidM1 : App {
     static constexpr float T_TEACH = 30.f;  // juvenile teaching window (s)
     std::array<std::array<float, PLACE_GRID_CELLS>, N_POOL> place_affinity{};
     std::array<float, N_POOL> teach_until{};  // sim_time when teaching window ends
+#endif
+
+    // --- M13-A: Tier A reflection scheduler ---
+#ifdef CORVID_USE_LLM
+    ReflectionThread             reflect_thread_;
+    std::array<float, N_POOL>    next_reflect_{};  // sim_time when slot next fires
+    int                          reflect_rr_   = 0; // round-robin cursor
+    bool                         llm_ready_    = false;
 #endif
 
     // --- entities ---
@@ -257,6 +269,30 @@ struct CorvidM1 : App {
         }
 #endif
 
+#ifdef CORVID_USE_LLM
+        {
+            // Model path: next to exe, or in assets/models/ relative to project root
+            const char* model_candidates[] = {
+                "assets/models/gemma-4-E2B-it-Q4_K_M.gguf",
+                "../../assets/models/gemma-4-E2B-it-Q4_K_M.gguf",
+                "../../../assets/models/gemma-4-E2B-it-Q4_K_M.gguf",
+            };
+            std::string model_path;
+            for (auto* c : model_candidates) {
+                if (FILE* f = std::fopen(c, "rb")) { std::fclose(f); model_path = c; break; }
+            }
+            if (model_path.empty()) { // ngl=0: CPU-only, VRAM reserved for libtorch
+                if (FILE* f = std::fopen("reflection.log", "a"))
+                    { std::fprintf(f, "[M13-A] no E2B model found; heuristic fallback\n"); std::fclose(f); }
+            } else {
+                llm_ready_ = reflect_thread_.start(model_path, /*ngl=*/0);
+                if (!llm_ready_) {
+                    FILE* f = std::fopen("reflection.log", "a");
+                    if (f) { std::fprintf(f, "[M13-A] model load failed; heuristic fallback\n"); std::fclose(f); }
+                }
+            }
+        }
+#endif
         // Build tetrahedron mesh once
         addTetrahedron(tetra_m);
 
@@ -544,6 +580,33 @@ struct CorvidM1 : App {
                 steer += f_place;
             }
 #endif
+            // M13-A: apply goal-stack biases (observer-window, additive on existing forces)
+            {
+                for (int g = 0; g < int(a.n_goals); ++g) {
+                    const GoalEntry& ge = a.goal_stack[g];
+                    float w = ge.weight;
+                    switch (ge.kind) {
+                        case GoalKind::SEEK_FOOD:
+                            steer += f_food * (w * 2.f);
+                            break;
+                        case GoalKind::AVOID_PREDATOR:
+                            steer += f_pred * (w * 2.f);
+                            break;
+                        case GoalKind::EXPLORE:
+                            // small random drift toward unexplored territory
+                            {
+                                Vec3f drift(rnd::uniformS(), rnd::uniformS(), rnd::uniformS());
+                                steer += drift.normalize() * (w * 0.4f);
+                            }
+                            break;
+                        case GoalKind::REST:
+                            // dampen velocity
+                            steer -= vel[i] * (w * 0.5f);
+                            break;
+                    }
+                }
+            }
+
             vel[i] += steer * dt;
             float spd = vel[i].mag();
             if (spd > ms) vel[i] = vel[i] * (ms / spd);
@@ -845,6 +908,86 @@ struct CorvidM1 : App {
                 }
             }
 #endif
+
+#ifdef CORVID_USE_LLM
+            // M13-A: drain reflection results into agent goal_stacks
+            {
+                ReflectResult results[64];
+                int nr = llm_ready_
+                    ? reflect_thread_.drain(results, 64)
+                    : 0;
+                for (int k = 0; k < nr; ++k) {
+                    int s = results[k].slot;
+                    if (s < 0 || s >= N_POOL || !pool[s].live) continue;
+                    if (pool[s].id != results[k].agent_id) continue; // slot recycled
+                    pool[s].n_goals = int8_t(results[k].n_goals);
+                    for (int g = 0; g < results[k].n_goals; ++g)
+                        pool[s].goal_stack[g] = results[k].goals[g];
+                    std::strncpy(pool[s].last_reflection, results[k].text, 255);
+                    pool[s].last_reflection[255] = '\0';
+                }
+
+                // Submit new reflection jobs (round-robin, up to REFLECT_BATCH agents)
+                if (llm_ready_ || true) {  // always schedule; heuristic runs if LLM unavailable
+                    std::vector<ReflectJob> jobs;
+                    int checked = 0;
+                    while (checked < N_POOL && int(jobs.size()) < ReflectionThread::REFLECT_BATCH) {
+                        int s = (reflect_rr_ + checked) % N_POOL;
+                        ++checked;
+                        if (!pool[s].live) continue;
+                        // cadence: aim for ~12 sim-sec per agent minimum
+                        float cadence = std::max(12.f, float(n_live) / float(ReflectionThread::REFLECT_BATCH) * 10.f);
+                        if (sim_time < next_reflect_[s]) continue;
+
+                        ReflectJob job;
+                        job.slot     = s;
+                        job.agent_id = pool[s].id;
+                        job.sim_time = sim_time;
+                        job.energy   = pool[s].energy;
+                        job.birth_t  = pool[s].birth_t;
+
+                        // Build memory digest from last 3 ring entries
+                        char dbuf[512] = {};
+                        int written = 0;
+                        for (int mi = mem_rings[s].size() - 1;
+                             mi >= 0 && mi >= int(mem_rings[s].size()) - 3; --mi) {
+                            const auto& m = mem_rings[s].get(mi);
+                            const char* kindstr = "event";
+                            if (m.kind == MK_FOOD)            kindstr = "ate food";
+                            else if (m.kind == MK_PREDATOR)   kindstr = "saw hawk";
+                            else if (m.kind == MK_BIRTH)      kindstr = "had child";
+                            else if (m.kind == MK_DEATH_WITNESSED) kindstr = "saw death";
+                            written += std::snprintf(dbuf + written,
+                                sizeof(dbuf) - written,
+                                "%s(t=%.0f) ", kindstr, m.timestamp);
+                            if (written >= int(sizeof(dbuf)) - 1) break;
+                        }
+                        std::strncpy(job.digest, dbuf, sizeof(job.digest) - 1);
+                        jobs.push_back(job);
+                        next_reflect_[s] = sim_time + cadence;
+                    }
+                    reflect_rr_ = (reflect_rr_ + checked) % N_POOL;
+
+                    if (!jobs.empty()) {
+                        if (llm_ready_) {
+                            reflect_thread_.submit(jobs.data(), int(jobs.size()));
+                        } else {
+                            // Heuristic fallback — run inline (cheap)
+                            for (auto& job : jobs) {
+                                auto res = heuristicReflect(job);
+                                int s2 = res.slot;
+                                if (s2 < 0 || s2 >= N_POOL || !pool[s2].live) continue;
+                                pool[s2].n_goals = int8_t(res.n_goals);
+                                for (int g = 0; g < res.n_goals; ++g)
+                                    pool[s2].goal_stack[g] = res.goals[g];
+                                std::strncpy(pool[s2].last_reflection, res.text, 255);
+                                pool[s2].last_reflection[255] = '\0';
+                            }
+                        }
+                    }
+                }
+            }
+#endif
         }
     }
 
@@ -974,7 +1117,7 @@ struct CorvidM1 : App {
         gui.draw(g);  // ControlGUI panel (beginPanel/endPanel — no frame management)
 
         ImGui::SetNextWindowPos({0.f, 370.f}, ImGuiCond_Always);
-        ImGui::SetNextWindowSize({300.f, 660.f}, ImGuiCond_Always);
+        ImGui::SetNextWindowSize({300.f, 720.f}, ImGuiCond_Always);
         ImGui::Begin("Analysis", nullptr,
                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
         drawAnalysis();
@@ -1048,6 +1191,22 @@ struct CorvidM1 : App {
         if (aff_n > 0) ImGui::Text("AvgAffMag: %.3f", aff_sum / float(aff_n));
 #endif
 
+#ifdef CORVID_USE_LLM
+        ImGui::Separator();
+        ImGui::TextColored({0.4f,0.8f,1.f,1.f}, "Tier A Reflection");
+        if (llm_ready_) {
+            ImGui::Text("batches=%d  last=%.0fms",
+                reflect_thread_.batches_done, reflect_thread_.last_batch_ms);
+        } else {
+            ImGui::TextColored({1.f,0.7f,0.3f,1.f}, "heuristic fallback");
+        }
+        // Show last reflection text for first live agent with LLM output
+        for (int ii = 0; ii < N_POOL; ++ii) {
+            if (!pool[ii].live || pool[ii].last_reflection[0] == '\0') continue;
+            ImGui::TextWrapped("a#%u: %s", pool[ii].id, pool[ii].last_reflection);
+            break;
+        }
+#endif
         int total_mems = 0;
         for (int i = 0; i < N_POOL; ++i)
             if (pool[i].live) total_mems += mem_rings[i].size();
