@@ -776,7 +776,15 @@ struct CorvidM1 : App {
                         h_value_loss.push(brain.last_value_loss);
                         float avg_r = 0.f;
                         for (float r : batch.returns) avg_r += r;
-                        h_avg_reward.push(batch.N > 0 ? avg_r / float(batch.N) : 0.f);
+                        float avg_ret = batch.N > 0 ? avg_r / float(batch.N) : 0.f;
+                        h_avg_reward.push(avg_ret);
+                        if (FILE* f = std::fopen("ppo_learning.log", "a")) {
+                            static int step = 0;
+                            std::fprintf(f, "%d %.4f %.4f %.4f %.4f %d\n",
+                                ++step, sim_time, avg_ret,
+                                brain.last_kl, brain.last_policy_loss, batch.N);
+                            std::fclose(f);
+                        }
                     }
                     ppo_buf.drain_ready();
                 }
