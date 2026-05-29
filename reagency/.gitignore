@@ -1,0 +1,7 @@
+# Build output
+build/
+
+# Offline factory intermediates + generated runtime assets (regenerate via factory/)
+factory/work/
+assets/*.bin
+assets/*.png
