@@ -39,6 +39,8 @@ bool WebRenderer::loadEdges(const std::string& path,
         || std::fread(&w, 4, 1, f) != 1) break;
     if (int(i) >= N || int(j) >= N) continue;   // edge references a point we don't have
     addEdge(P[i], P[j], C[i], C[j], w);
+    adj_[i].push_back({int(j), w});           // adjacency for the Conductor (both directions)
+    adj_[j].push_back({int(i), w});
     ++n_edges_;
   }
   std::fclose(f);
@@ -61,7 +63,8 @@ void WebRenderer::knnFallback(const std::vector<Vec3f>& P, const std::vector<Vec
     std::partial_sort(d.begin(), d.begin() + kk, d.end());
     for (int n = 0; n < kk; ++n) {
       const int j = d[n].second;
-      if (j > i) { addEdge(P[i], P[j], C[i], C[j], 0.6f); ++n_edges_; }  // undirected, once
+      adj_[i].push_back({j, 0.6f});                                      // adjacency (directed)
+      if (j > i) { addEdge(P[i], P[j], C[i], C[j], 0.6f); ++n_edges_; }  // mesh (undirected once)
     }
   }
 }
@@ -71,6 +74,7 @@ bool WebRenderer::init(const std::string& assetDir,
   mesh_.reset();
   mesh_.primitive(Mesh::LINES);
   n_edges_ = 0; loaded_real_ = false;
+  adj_.assign(P.size(), {});
 
   const std::string candidates[] = {
     assetDir + "/edges.bin",

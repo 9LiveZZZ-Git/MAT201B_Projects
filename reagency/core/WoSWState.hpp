@@ -25,6 +25,7 @@ struct WoSWState {
   int32_t  curNode  = -1;      // node the machine is attending
   int32_t  nextNode = -1;      // candidate it is about to commit to
   float    hesitation = 0.f;   // = entropy of the next-step distribution
+  float    focusPos[3] = {0.f, 0.f, 0.f};  // current fixation point (camera + marker)
 
   // Human trace (M2+): which image is surfacing, and how strongly.
   float    traceNode  = -1.f;

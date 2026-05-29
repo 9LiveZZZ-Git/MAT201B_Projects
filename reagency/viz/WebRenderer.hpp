@@ -10,6 +10,7 @@
 #include "al/graphics/al_VAOMesh.hpp"
 #include "al/math/al_Vec.hpp"
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wosw {
@@ -26,10 +27,14 @@ struct WebRenderer {
   int  edgeCount()  const { return n_edges_; }
   bool loadedReal() const { return loaded_real_; }
 
+  // The graph the Conductor walks: adjacency[i] = list of (neighbor, weight) for node i.
+  const std::vector<std::vector<std::pair<int, float>>>& adjacency() const { return adj_; }
+
  private:
   al::VAOMesh mesh_;
   int  n_edges_     = 0;
   bool loaded_real_ = false;
+  std::vector<std::vector<std::pair<int, float>>> adj_;   // graph for the Conductor
 
   bool loadEdges(const std::string& path,
                  const std::vector<al::Vec3f>& P, const std::vector<al::Vec3f>& C);
