@@ -116,7 +116,8 @@ class AudioEngine {
   float beatPhase_ = 0.f;
   float subPhase_ = 0.f, subAmp_ = 0.f, subLp_ = 0.f, subHz_ = 55.f;
   static constexpr int SHEP = 6;
-  float shepPhase_ = 0.f, shepPh_[SHEP] = {}, shepBp_[SHEP] = {}, shepRate_ = 0.04f, shepRateTgt_ = 0.04f, shepGain_ = 0.f;  // shepPh_/shepBp_ = noise-bandpass SVF states
+  float shepPhase_ = 0.f, shepPh_[SHEP] = {}, shepBp_[SHEP] = {}, shepRate_ = 0.04f, shepRateTgt_ = 0.04f, shepGain_ = 0.f;  // shepPh_/shepBp_ = noise-bandpass SVF states (L)
+  float shepPhR_[SHEP] = {}, shepBpR_[SHEP] = {};      // right-channel SVF bank (independent noise -> stereo Shepard)
   float nzLp_ = 0.f, nzLp2_ = 0.f;
   uint32_t euMask_ = 0x49u; int euLen_ = 8, euStep_ = 0; float euPhase_ = 0.f;
   uint32_t euMask2_ = 0x15u; int euLen2_ = 5, euStep2_ = 0; float euPhase2_ = 0.f; int timpDeg_ = 0;

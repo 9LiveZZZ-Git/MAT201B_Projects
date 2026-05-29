@@ -444,19 +444,21 @@ void AudioEngine::render(al::AudioIOData& io) {
     // Gaussian-windowed in log-frequency and sweeping forever -> an endless rising NOISE bed
     // (the moving filter IS the Shepard tone).
     shepPhase_ += shepRate_ * isr; if (shepPhase_ >= 1.f) shepPhase_ -= 1.f; if (shepPhase_ < 0.f) shepPhase_ += 1.f;
-    float shnz = frand() * 2.f - 1.f, sh = 0.f, shn = 0.f;
+    float nzL = frand() * 2.f - 1.f, nzR = frand() * 2.f - 1.f;   // independent L/R noise -> true STEREO
+    float shL = 0.f, shR = 0.f, shn = 0.f;
     for (int i = 0; i < SHEP; ++i) {
       float oct = shepPhase_ + float(i) / SHEP; oct -= std::floor(oct);
       float fi = 32.7f * std::pow(2.f, oct * 6.f), lf = std::log2(fi);
       float a = std::exp(-0.5f * (lf - std::log2(300.f)) * (lf - std::log2(300.f)) / (1.4f * 1.4f));
       float ff = 2.f * std::sin(kPI * std::min(fi, float(sr_) / 6.f) / float(sr_)); const float q = 0.05f;
-      shepPh_[i] = dn(shepPh_[i] + ff * shepBp_[i]);            // SVF low-pass state
-      float hp = shnz - shepPh_[i] - q * shepBp_[i];
-      shepBp_[i] = dn(shepBp_[i] + ff * hp);                    // band-pass output = the Shepard band
-      sh += a * shepBp_[i]; shn += a;
+      shepPh_[i]  = dn(shepPh_[i]  + ff * shepBp_[i]);  float hpL = nzL - shepPh_[i]  - q * shepBp_[i];  shepBp_[i]  = dn(shepBp_[i]  + ff * hpL); shL += a * shepBp_[i];
+      shepPhR_[i] = dn(shepPhR_[i] + ff * shepBpR_[i]); float hpR = nzR - shepPhR_[i] - q * shepBpR_[i]; shepBpR_[i] = dn(shepBpR_[i] + ff * hpR); shR += a * shepBpR_[i];
+      shn += a;
     }
-    float bedair = (shn > 0 ? sh / shn : 0.f) * shepGain_ * 3.4f;   // band-pass is quiet -> lift
-    bedL += bedair * (0.7f + drift); bedR += bedair * (0.7f - drift); revSend += bedair * 1.2f;
+    float gn = shepGain_ * 3.4f / (shn > 0 ? shn : 1.f);
+    float bedairL = shL * gn, bedairR = shR * gn;
+    bedL += bedairL; bedR += bedairR;                            // full STEREO (no mono)
+    revSend += (bedairL + bedairR) * 0.30f;                      // ~85% dry / 15% wet
 
     // grain cloud (Poisson)
     grainTimer_ -= isr;
