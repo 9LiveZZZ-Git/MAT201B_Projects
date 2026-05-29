@@ -125,7 +125,7 @@ class AudioEngine {
   float fxTimer_ = 6.f;                                // industrial-clang scheduler
   float grainTimer_ = 0.f; uint32_t rng_ = 0x9E3779B9u; float frand();
   int   lastClusterId_ = -999;
-  float duckGain_ = 1.f, lowDuck_ = 1.f;               // bed + low-end duck under the whisper
+  float duckGain_ = 1.f, lowDuck_ = 1.f, kickDuck_ = 1.f;   // bed + low-end duck under whisper; sub sidechain vs kick
   // arrangement gates (glided) + dubstep growl LFO/filter + ping-pong delay (grains+whispers)
   float droneGate_ = 1.f, whisperGate_ = 1.f, grainGate_ = 1.f, growl_ = 0.f;
   float wobPhase_ = 0.f, growlLp_ = 0.f, growlBp_ = 0.f, wobMult_ = 1.f, wobChange_ = 0.f;

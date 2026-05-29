@@ -269,7 +269,7 @@ void AudioEngine::trigger(const Ev& e) {
     case 1: { v.life = 1.2f; v.atk = 0.004f; int s = pickSample(rBell_, v.hz); if (s >= 0) setSample(s); else setPartials(6, 0.004f); break; }
     case 3: { v.life = 7.5f; v.atk = 0.9f; v.tslot = e.islot; int s = pickSample(rTrace_, v.hz); if (s >= 0) { setSample(s); v.life = std::min(7.5f, float(v.smpLen)/float(sr_)); } else setPartials(4, 0.0006f); break; }
     case 5: { int s = pickSample(rBass_, v.hz); if (s >= 0) { setSample(s); v.life = std::min(5.0f, float(v.smpLen)/float(sr_)); } else { v.life = 4.0f; setPartials(3, 0.0003f); } v.atk = 0.25f; break; }
-    case 6: { v.life = 0.26f; v.atk = 0.001f; break; }
+    case 6: { v.life = 0.26f; v.atk = 0.001f; kickDuck_ = 0.12f; break; }   // kick sidechains the sub-bass down
     case 7: { v.life = 0.9f; v.atk = 0.003f; int s = pickSample(rTimp_, v.hz); if (s >= 0) setSample(s); else setPartials(4, 0.02f); break; }   // pitched timpani
     case 8: { v.life = 1.7f; v.atk = 0.001f; int s = pickSample(rMetal_, v.hz);                                                                  // industrial clang
               if (s >= 0) setSample(s); else { v.K = 5; float mr[5] = {1.f, 2.76f, 5.40f, 8.93f, 13.3f}; v.pnorm = 0.f; for (int k = 0; k < 5; ++k) { v.pm[k] = mr[k]; v.pa[k] = 1.f / std::pow(k + 1.f, 0.8f); v.pnorm += v.pa[k]; } } break; }
@@ -327,7 +327,7 @@ void AudioEngine::render(al::AudioIOData& io) {
   padBloom_ += ((0.30f + 0.70f * depth) - padBloom_) * gco(0.6f, nf, sr_);
   reverbWet_ += (clamp01(0.42f + 0.16f * (1.f - depth) + 0.10f * hes + 0.14f * mw) - reverbWet_) * gco(0.6f, nf, sr_);   // more global reverb
   subAmp_   += ((0.125f + 0.15f * (1.f - depth)) - subAmp_) * gco(7.f, nf, sr_);   // bass +~5 dB
-  shepGain_ += ((0.016f + 0.012f * depth + 0.012f * tension_) - shepGain_) * gco(1.f, nf, sr_);
+  shepGain_ += ((0.040f + 0.020f * depth + 0.015f * tension_) - shepGain_) * gco(1.f, nf, sr_);   // Shepard up to the front
   shepRateTgt_ = (hes > 0.55f ? -1.f : 1.f) * (1.f / (16.f - 8.f * hes)); shepRate_ += (shepRateTgt_ - shepRate_) * gco(8.f, nf, sr_);
   bool whisperOn = false; for (auto& v : vox_) if (v.on && v.layer == 4) { whisperOn = true; break; }
   duckGain_ += ((whisperOn ? 0.6f : 1.f) - duckGain_) * gco(0.25f, nf, sr_);
@@ -412,9 +412,11 @@ void AudioEngine::render(al::AudioIOData& io) {
       subOut = subOut * (1.f - gact) + growlHp * gact * 0.047f;     // wobble down a further ~10 dB
     }
     lowMono += subOut * subAmp_ * droneGate_;
-    // pure mono triangle SUB-BASS — a deep foundation (NOT gated by the drone), owns the low end
-    triHz_ += (padRoot * 0.5f - triHz_) * 0.0004f; triPhase_ += triHz_ * isr; if (triPhase_ >= 1.f) triPhase_ -= 1.f;
-    lowMono += (4.f * std::fabs(triPhase_ - 0.5f) - 1.f) * 0.13f;
+    // pure mono triangle SUB-BASS — deep (35 Hz and below), sidechain-GATED against the kick
+    float ttgt = padRoot * 0.25f; if (ttgt > 35.f) ttgt = 35.f;          // 35 Hz and below
+    triHz_ += (ttgt - triHz_) * 0.0004f; triPhase_ += triHz_ * isr; if (triPhase_ >= 1.f) triPhase_ -= 1.f;
+    kickDuck_ += (1.f - kickDuck_) * 0.00025f;                            // recover (~90 ms) from the kick duck
+    lowMono += (4.f * std::fabs(triPhase_ - 0.5f) - 1.f) * 0.45f * kickDuck_;
 
     // MOVING JI drone: per-partial slow tremolo + detune drift + vibrato
     for (int p = 0; p < PADN; ++p) {
@@ -476,7 +478,9 @@ void AudioEngine::render(al::AudioIOData& io) {
       else {
         float pan = v.pan + (v.layer == 2 || v.layer == 8 ? drift : 0.f); float pp = 0.5f * (pan + 1.f); pp = pp < 0 ? 0 : (pp > 1 ? 1 : pp);
         float cL = std::cos(pp * 1.5707963f), cR = std::sin(pp * 1.5707963f);
-        bedL += s * cL; bedR += s * cR; revSend += s * 0.5f;
+        bool up = (v.layer <= 2 || v.layer == 8);            // upper part: pluck/bell/grain/clang
+        float dryg = up ? 0.72f : 1.f, rv = up ? 1.25f : 0.5f;   // pushed back + further into reverb
+        bedL += dryg * s * cL; bedR += dryg * s * cR; revSend += s * rv;
         if (v.layer == 2) { ppSendL += 0.55f * s * cL; ppSendR += 0.55f * s * cR; }   // grains -> delay
         if (v.smp) sampSend += s;                                                     // CC0 samples -> short reverb
       }
