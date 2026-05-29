@@ -155,6 +155,73 @@ def build_atlas(meta, coords, density, cluster_id, corpus, assets, max_hero=64, 
     return atlas_idx
 
 
+def _label_font(size):
+    from PIL import ImageFont
+    # Prefer a broad-script font (Noto) so multilingual labels render; fall back gracefully.
+    for p in ["/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+              "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+              "/Library/Fonts/Arial Unicode.ttf",
+              "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"]:
+        if os.path.exists(p):
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:
+                pass
+    return ImageFont.load_default()
+
+
+def build_labels(E, meta, cluster_id, coords, atlas_idx, assets, cols=8, cw=256, ch=64):
+    """The machine's CLASSIFICATION: each image's nearest concept WORD (and each cluster's),
+    pre-rendered to a label atlas. Writes labels_atlas.png + labels.txt (floating cluster
+    labels) + classify.txt (per-image classification). Needs the modality-centered E so word
+    and image vectors are comparable."""
+    from PIL import Image, ImageDraw
+    N = len(meta)
+    word_idx = [i for i in range(N) if meta[i]["type"] == "word"]
+    if not word_idx:
+        print("[stage_b] no words -> skipping classification labels"); return
+    Ew = E[word_idx]                                   # L2-normalized
+    nearest = lambda v: word_idx[int(np.argmax(Ew @ v))]
+
+    cluster_label, img_label = {}, {}                  # c->(ctr,word) ; node->word
+    for c in sorted(set(int(x) for x in cluster_id if x >= 0)):
+        members = [i for i in range(N) if cluster_id[i] == c]
+        if not members:
+            continue
+        cen = E[members].mean(0); cen /= (np.linalg.norm(cen) + 1e-9)
+        cluster_label[c] = (coords[members].mean(0), meta[nearest(cen)]["label"])
+    for i in range(N):
+        if meta[i]["type"] == "image" and atlas_idx[i] >= 0:
+            img_label[i] = meta[nearest(E[i])]["label"]
+
+    slot = {}                                          # word string -> atlas slot
+    for _, w in cluster_label.values():
+        slot.setdefault(w, len(slot))
+    for w in img_label.values():
+        slot.setdefault(w, len(slot))
+
+    rows = max(1, (len(slot) + cols - 1) // cols)
+    atlas = Image.new("RGBA", (cols * cw, rows * ch), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(atlas)
+    for s, k in slot.items():
+        gx, gy = (k % cols) * cw, (k // cols) * ch
+        f = _label_font(40)
+        while getattr(f, "getlength", lambda t: 0)(s) > cw * 0.92 and f.size > 12:
+            f = _label_font(f.size - 4)
+        draw.text((gx + cw / 2, gy + ch / 2), s, fill=(255, 255, 255, 255), font=f, anchor="mm")
+    atlas.save(os.path.join(assets, "labels_atlas.png"))
+
+    with open(os.path.join(assets, "labels.txt"), "w") as f:     # cx cy cz slot word
+        for _c, (ctr, w) in cluster_label.items():
+            f.write("%.3f %.3f %.3f %d %s\n" % (ctr[0], ctr[1], ctr[2], slot[w], w))
+    with open(os.path.join(assets, "classify.txt"), "w") as f:   # node slot
+        for node, w in img_label.items():
+            f.write("%d %d\n" % (node, slot[w]))
+    print("[stage_b] labels: %d clusters, %d image classifications, %d unique words -> labels_atlas.png"
+          % (len(cluster_label), len(img_label), len(slot)))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--work", default=os.path.join(HERE, "work"))
@@ -166,6 +233,7 @@ def main():
     ap.add_argument("--no-atlas", action="store_true")
     ap.add_argument("--no-modality-center", action="store_true",
                     help="keep CLIP's image/text gap (words stay a separate disconnected cluster)")
+    ap.add_argument("--no-labels", action="store_true", help="skip the classification label atlas")
     a = ap.parse_args()
     os.makedirs(a.assets, exist_ok=True)
 
@@ -207,15 +275,10 @@ def main():
         f.write(b"WSWE"); f.write(struct.pack("<ii", 1, len(edges)))
         for (i, j, w) in edges:
             f.write(struct.pack("<IIf", i, j, w))
-    # labels.txt (cluster centroids + a representative label)
-    with open(os.path.join(a.assets, "labels.txt"), "w") as f:
-        for c in sorted(set(int(x) for x in cluster_id if x >= 0)):
-            members = [i for i in range(N) if cluster_id[i] == c]
-            ctr = coords[members].mean(axis=0)
-            # prefer a word as the human-readable cluster label, else a title
-            words = [meta[i]["label"] for i in members if meta[i]["type"] == "word"]
-            label = words[0] if words else (meta[members[0]]["label"] if members else "cluster %d" % c)
-            f.write("%d\t%.3f\t%.3f\t%.3f\t%s\n" % (c, ctr[0], ctr[1], ctr[2], label))
+    # classification labels: the machine's words for images + clusters, pre-rendered to an atlas
+    # (labels_atlas.png + labels.txt floating-cluster labels + classify.txt per-image labels).
+    if not a.no_labels:
+        build_labels(E, meta, cluster_id, coords, atlas_idx, a.assets)
     # cluster representatives (one image per cluster) -> Stage D vessel generator inputs.
     reps = {}
     for c in sorted(set(int(x) for x in cluster_id if x >= 0)):
@@ -241,6 +304,7 @@ def main():
         "n_clusters": int(len(set(int(x) for x in cluster_id if x >= 0))),
         "audio": {"root_hz": 220.0, "mode": [0, 2, 3, 5, 7, 8, 10]},  # A natural minor
         "atlas": {"file": "atlas_0.png", "px": 256, "grid": 8} if not a.no_atlas else None,
+        "labels": {"file": "labels_atlas.png", "cols": 8, "cell_w": 256, "cell_h": 64} if not a.no_labels else None,
     }, open(os.path.join(a.assets, "manifest.json"), "w"), indent=2)
 
     print("[stage_b] DONE -> %s" % a.assets)

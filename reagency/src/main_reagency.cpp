@@ -15,6 +15,7 @@
 #include "viz/WebRenderer.hpp"
 #include "viz/VesselSplats.hpp"
 #include "viz/HumanTrace.hpp"
+#include "viz/LabelLayer.hpp"
 
 #include <cmath>
 #include <memory>
@@ -33,6 +34,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   Conductor     conductor;
   VesselSplats  vessel;
   HumanTrace    trace;
+  LabelLayer    labels;
   std::vector<int> heroNodes_;                // corpus image nodes that have an atlas thumbnail
   int           heroCursor_ = 0;
   float         traceTimer_ = 0.f;
@@ -48,6 +50,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     conductor.init(pos, webs.adjacency(), 7);
     vessel.init(assetDir);
     trace.init(assetDir);
+    labels.init(assetDir);
     for (int i = 0; i < field.count(); ++i)            // traceable corpus photos
       if (field.typeOf(i) == 0 && field.atlasOf(i) >= 0) heroNodes_.push_back(i);
     nav().pos().set(0.0, 0.0, 16.0);
@@ -136,19 +139,32 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     // The "vessel" at the core — faint central haze (the missing splat middle; comes from Colab).
     vessel.draw(g, Vec3f(0, 0, 0), 1.3f, 0.3f);
 
-    // Human traces: photos surface at their node positions all around you (multiple at once),
-    // each dissolving into grains that stream out into the galaxy.
+    // Camera-facing axes (for billboards), from the synced pose.
     auto& s = state();
+    Quatd q(s.navQuat[3], s.navQuat[0], s.navQuat[1], s.navQuat[2]);
+    Vec3d rgt = q.rotate(Vec3d(1, 0, 0));
+    Vec3d upv = q.rotate(Vec3d(0, 1, 0));
+    const Vec3f camR(float(rgt.x), float(rgt.y), float(rgt.z));
+    const Vec3f camU(float(upv.x), float(upv.y), float(upv.z));
+
+    // The machine's CLASSIFICATION: floating word labels at the cluster centroids (a standing
+    // map of what the machine thinks the imagery IS).
+    labels.drawClusters(g, camR, camU, 0.55f);
+
+    // Human traces: photos surface at their node positions (multiple at once), dissolving into
+    // grains that stream into the galaxy — and the word the machine classifies each as.
     if (trace.ready()) {
-      Quatd q(s.navQuat[3], s.navQuat[0], s.navQuat[1], s.navQuat[2]);
-      Vec3d rgt = q.rotate(Vec3d(1, 0, 0));
-      Vec3d upv = q.rotate(Vec3d(0, 1, 0));
-      const Vec3f camR(float(rgt.x), float(rgt.y), float(rgt.z));
-      const Vec3f camU(float(upv.x), float(upv.y), float(upv.z));
       for (int i = 0; i < WoSWState::N_TRACE; ++i) {
         if (s.traceNode[i] < 0) continue;
-        trace.draw(g, field.posOf(s.traceNode[i]), camR, camU,
-                   field.atlasOf(s.traceNode[i]), s.traceAge[i], TRACE_LIFE);
+        const Vec3f p = field.posOf(s.traceNode[i]);
+        const float a = s.traceAge[i];
+        trace.draw(g, p, camR, camU, field.atlasOf(s.traceNode[i]), a, TRACE_LIFE);
+        // its classifying word, just below the photo, fading on the same envelope
+        const float r01 = a / TRACE_LIFE;
+        float lab = (r01 < 0.12f) ? (r01 / 0.12f)
+                  : (r01 < 0.5f) ? 1.f : (1.f - (r01 - 0.5f) / 0.5f);
+        if (lab < 0.f) lab = 0.f;
+        labels.drawSlot(g, p - camU * 1.4f, camR, camU, labels.slotForNode(s.traceNode[i]), lab, 0.45f);
       }
     }
   }
