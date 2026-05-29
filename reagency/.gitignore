@@ -1,7 +1,10 @@
 # Build output
 build/
 
-# Offline factory intermediates + generated runtime assets (regenerate via factory/)
+# Offline factory intermediates (regenerate via factory/)
 factory/work/
-assets/*.bin
-assets/*.png
+
+# NOTE: assets/ (points.bin, edges.bin, labels.txt, manifest.json, atlas_0.png) ARE
+# committed on purpose — they are a few MB and this is how they reach the Mac preview
+# and every AlloSphere render node via `git pull`, instead of per-node scp. Regenerate
+# anytime with factory/make_assets.sh.
