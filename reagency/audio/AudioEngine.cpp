@@ -406,7 +406,7 @@ void AudioEngine::render(al::AudioIOData& io) {
       for (int k = 0; k < 3; ++k) { float y = growlFmtCoef_[k][0] * g - growlFmtCoef_[k][1] * growlFz_[k][0] - growlFmtCoef_[k][2] * growlFz_[k][1];
         growlFz_[k][1] = dn(growlFz_[k][0]); growlFz_[k][0] = dn(y); fo += fw[k] * y; }
       g = 0.55f * g + 1.6f * fo;
-      subOut = subOut * (1.f - gact) + g * gact * 0.85f;   // dubstep growl level down
+      subOut = subOut * (1.f - gact) + g * gact * 0.15f;   // dubstep growl level down a further ~15 dB
     }
     lowMono += subOut * subAmp_ * droneGate_;
 
