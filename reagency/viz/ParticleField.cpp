@@ -126,6 +126,7 @@ bool ParticleField::init(const std::string& assetDir) {
   const std::string candidates[] = {
     assetDir + "/points.bin",
     "assets/points.bin",
+    "../../assets/points.bin",            // when launched from reagency/src/bin (run.sh)
     "reagency/assets/points.bin",
     "MAT201B_Projects/reagency/assets/points.bin",
   };

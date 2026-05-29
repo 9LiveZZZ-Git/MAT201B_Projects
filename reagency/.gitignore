@@ -1,5 +1,6 @@
 # Build output
 build/
+bin/
 
 # Offline factory intermediates (regenerate via factory/)
 factory/work/
