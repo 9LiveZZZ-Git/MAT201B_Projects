@@ -1,0 +1,11 @@
+# Track the scripts + plan in this directory; ignore heavy/generated artifacts.
+*.bin
+*.npz
+*.ckpt
+*.safetensors
+*.pt
+*.pth
+__pycache__/
+data/
+checkpoints/
+runs/

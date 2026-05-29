@@ -128,6 +128,9 @@ bool SplatModel::init(const std::string& crow_path,
     n_ = int(splats_.size());
 
     have_student_ = loadStudent(student_path);
+    std::fprintf(stderr, "[corvid] splat cloud: %d points, %s\n", n_,
+                 have_student_ ? "distilled student loaded"
+                               : "procedural fallback (no student.bin)");
 
     mesh_.primitive(Mesh::POINTS);
     rebuildMesh();
