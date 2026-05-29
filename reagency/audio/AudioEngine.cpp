@@ -327,8 +327,8 @@ void AudioEngine::render(al::AudioIOData& io) {
   padBloom_ += ((0.30f + 0.70f * depth) - padBloom_) * gco(0.6f, nf, sr_);
   reverbWet_ += (clamp01(0.42f + 0.16f * (1.f - depth) + 0.10f * hes + 0.14f * mw) - reverbWet_) * gco(0.6f, nf, sr_);   // more global reverb
   subAmp_   += ((0.125f + 0.15f * (1.f - depth)) - subAmp_) * gco(7.f, nf, sr_);   // bass +~5 dB
-  shepGain_ += ((0.040f + 0.020f * depth + 0.015f * tension_) - shepGain_) * gco(1.f, nf, sr_);   // Shepard up to the front
-  shepRateTgt_ = (hes > 0.55f ? -1.f : 1.f) * (1.f / (16.f - 8.f * hes)); shepRate_ += (shepRateTgt_ - shepRate_) * gco(8.f, nf, sr_);
+  shepGain_ += ((0.020f + 0.012f * depth + 0.010f * tension_) - shepGain_) * gco(1.f, nf, sr_);   // tamed: down ~6 dB
+  shepRateTgt_ = (hes > 0.55f ? -1.f : 1.f) * (1.f / (80.f - 40.f * hes)); shepRate_ += (shepRateTgt_ - shepRate_) * gco(8.f, nf, sr_);   // near-static (~80 s/cycle)
   bool whisperOn = false; for (auto& v : vox_) if (v.on && v.layer == 4) { whisperOn = true; break; }
   duckGain_ += ((whisperOn ? 0.6f : 1.f) - duckGain_) * gco(0.25f, nf, sr_);
   lowDuck_  += ((whisperOn ? 0.8f : 1.f) - lowDuck_) * gco(0.25f, nf, sr_);
@@ -450,7 +450,7 @@ void AudioEngine::render(al::AudioIOData& io) {
       float oct = shepPhase_ + float(i) / SHEP; oct -= std::floor(oct);
       float fi = 32.7f * std::pow(2.f, oct * 6.f), lf = std::log2(fi);
       float a = std::exp(-0.5f * (lf - std::log2(300.f)) * (lf - std::log2(300.f)) / (1.4f * 1.4f));
-      float ff = 2.f * std::sin(kPI * std::min(fi, float(sr_) / 6.f) / float(sr_)); const float q = 0.05f;
+      float ff = 2.f * std::sin(kPI * std::min(fi, float(sr_) / 6.f) / float(sr_)); const float q = 0.6f;   // WIDE/soft bands -> no whistle
       shepPh_[i]  = dn(shepPh_[i]  + ff * shepBp_[i]);  float hpL = nzL - shepPh_[i]  - q * shepBp_[i];  shepBp_[i]  = dn(shepBp_[i]  + ff * hpL); shL += a * shepBp_[i];
       shepPhR_[i] = dn(shepPhR_[i] + ff * shepBpR_[i]); float hpR = nzR - shepPhR_[i] - q * shepBpR_[i]; shepBpR_[i] = dn(shepBpR_[i] + ff * hpR); shR += a * shepBpR_[i];
       shn += a;
