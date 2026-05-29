@@ -1,0 +1,18 @@
+# World of Shadow Work — OFFLINE factory dependencies.
+# Run these on the CUDA box (RTX 4060 Ti). NONE of this is part of the allolib
+# runtime build — the factory only emits plain *.bin / *.png / *.json assets.
+#
+# Install torch with CUDA first (pick the wheel matching your CUDA), e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# then:
+#   pip install -r requirements.txt
+#
+# Everything here is INFERENCE + classical ML — no model training.
+
+open_clip_torch        # pretrained CLIP (ViT-L/14) image+text embedding
+umap-learn             # high-dim -> 3D galaxy layout
+faiss-cpu              # cosine k-NN graph (the similarity "webs"); falls back to sklearn
+hdbscan                # semantic clusters; falls back to sklearn KMeans
+scikit-learn           # fallbacks (NearestNeighbors, KMeans) + utilities
+numpy
+pillow                 # image loading + thumbnail atlas

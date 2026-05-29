@@ -1,0 +1,7 @@
+# Corpus images are large and re-fetchable via ../fetch_corpus.py — do not commit them.
+# Keep the attribution ledger and the word list under version control.
+images/
+!ATTRIBUTION.csv
+!words/
+!words/**
+!.gitignore
