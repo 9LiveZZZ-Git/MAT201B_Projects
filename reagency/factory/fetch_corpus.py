@@ -36,12 +36,18 @@ CORPUS = os.path.join(ROOT, "corpus")
 QUERIES = {
     "labor": ["labor", "worker", "factory", "industry", "harvest", "miner",
               "weaver", "blacksmith", "loom", "spinning", "peasant", "forge",
-              "mill", "tools", "craftsman"],
+              "mill", "tools", "craftsman", "carpenter", "mason", "potter",
+              "sewing", "textile", "plow", "reaper", "servant", "market",
+              "trade", "wage", "machine", "engine", "laborer", "fishermen"],
     "magic": ["alchemy", "witchcraft", "tarot", "astrology", "talisman", "amulet",
               "divination", "zodiac", "sorcery", "demon", "ritual", "astrologer",
-              "occult", "magic", "spell"],
+              "occult", "magic", "spell", "spirit", "ghost", "oracle", "prophecy",
+              "incantation", "charm", "idol", "serpent", "moon", "alembic",
+              "philosopher", "mystic", "vision", "dream", "transformation"],
     "agency": ["puppet", "marionette", "automaton", "hand", "mask", "gesture",
-               "puppeteer", "self-portrait", "fortune", "mechanical", "clockwork"],
+               "puppeteer", "self-portrait", "fortune", "mechanical", "clockwork",
+               "arm", "grasp", "lever", "wheel", "key", "lock", "chain", "crown",
+               "scepter", "throne", "figure", "will", "fate", "command"],
 }
 
 
@@ -150,7 +156,7 @@ def fetch_cma(theme, q, per_query, seen, rows):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--per-query", type=int, default=12, help="max images per search term per source")
+    ap.add_argument("--per-query", type=int, default=20, help="max images per search term per source")
     ap.add_argument("--themes", nargs="*", default=list(QUERIES.keys()))
     ap.add_argument("--sources", nargs="*", default=["aic", "cma"])
     args = ap.parse_args()

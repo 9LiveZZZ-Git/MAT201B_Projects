@@ -89,6 +89,8 @@ def main():
     ap.add_argument("--plys", default=os.path.join(here, "work", "vessels"))
     ap.add_argument("--assets", default=os.path.abspath(os.path.join(here, "..", "assets")))
     ap.add_argument("--G", type=int, default=12000, help="Gaussians per keyframe (dome-safe ~8k-16k)")
+    ap.add_argument("--max-mb", type=float, default=60.0,
+                    help="cap vessel.wswv size; auto-reduces G when there are many keyframes")
     ap.add_argument("--seed", type=int, default=42)
     a = ap.parse_args()
     rng = np.random.default_rng(a.seed)
@@ -97,17 +99,20 @@ def main():
     paths = sorted(glob.glob(os.path.join(a.plys, "*.ply")))
     if not paths:
         raise SystemExit("[stage_d] no .ply files in %s — generate vessels first (see VESSEL.md)" % a.plys)
-    print("[stage_d] %d keyframe .ply files" % len(paths))
+    K = len(paths)
+    G = a.G
+    if K * a.G * 16 > a.max_mb * 1e6:                 # keep vessel.wswv within the size cap
+        G = max(1500, int(a.max_mb * 1e6 / (K * 16)))
+        print("[stage_d] %d keyframes x G=%d = %.0f MB > %d MB cap -> reducing G to %d"
+              % (K, a.G, K * a.G * 16 / 1e6, a.max_mb, G))
+    print("[stage_d] %d keyframe .ply files, G=%d/keyframe" % (K, G))
 
     kfs = []
     for p in paths:
         pos, rgb, op, sigma = read_ply_gaussians(p)
         pos = pos - pos.mean(0)                       # recenter each
-        kfs.append(pick_fixed_G(pos, rgb, op, sigma, a.G, rng))
-        print("   %-40s %d -> %d gaussians" % (os.path.basename(p), len(op), a.G))
-
-    K = len(kfs)
-    G = a.G
+        kfs.append(pick_fixed_G(pos, rgb, op, sigma, G, rng))
+        print("   %-40s %d -> %d gaussians" % (os.path.basename(p), len(op), G))
     # ONE global AABB across all keyframes (so the morph never pops in scale)
     allpos = np.concatenate([k[0] for k in kfs], 0)
     mn, mx = allpos.min(0), allpos.max(0)

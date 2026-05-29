@@ -5,6 +5,11 @@ representative corpus photo**, melted between clusters at runtime. Generation is
 (on Google Colab Pro+, A100 ~40 GB); the allolib runtime only loads a compact binary — no
 runtime ML. This doc is the verified runbook (from the vessel-design workflow).
 
+> **Easiest path: open `factory/wosw_colab.ipynb` in Colab and Run All** — it runs this whole
+> pipeline (corpus → embeddings → galaxy + webs → vessels → `vessel.wswv`) and pushes the assets
+> back. `prep_vessel_inputs.py --mode all` makes **one vessel per image**, not just per cluster.
+> The steps below are the manual reference.
+
 ## The one decision that makes or breaks it: correspondence
 Two **independently generated** splat clouds have **no point correspondence** — so a naïve
 fixed-index lerp makes every point fly along an arbitrary chord = global *swimming*, not a

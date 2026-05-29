@@ -1,8 +1,12 @@
 # World of Shadow Work — offline factory
 
-This directory is **not** part of the allolib build. It runs once (on the RTX 4060 Ti
-box) to turn the corpus into plain data assets the runtime loads. Pretrained-inference +
+This directory is **not** part of the allolib build. It runs offline (on **Google Colab Pro+**,
+A100 ~40 GB) to turn the corpus into plain data assets the runtime loads. Pretrained-inference +
 classical ML only — **no training**.
+
+**One-stop: open `wosw_colab.ipynb` in Colab, edit the CONFIG cell, and Run All** — it runs the
+whole pipeline (corpus → embeddings → galaxy + webs → image-to-3D vessels → `vessel.wswv`) and
+pushes the assets back to GitHub. The per-stage scripts below are the manual reference.
 
 ## Pipeline
 ```
