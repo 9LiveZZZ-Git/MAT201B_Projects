@@ -36,7 +36,8 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   std::vector<int> heroNodes_;                // corpus image nodes that have an atlas thumbnail
   int           heroCursor_ = 0;
   float         traceTimer_ = 0.f;
-  static constexpr float TRACE_LIFE = 4.5f;   // seconds a surfaced photo lives
+  static constexpr float TRACE_LIFE  = 9.0f;  // seconds a surfaced photo lives (lingers)
+  static constexpr float TRACE_EVERY = 6.0f;  // cadence between new photos (calm, ~rotation-paced)
   std::string   assetDir = "assets";
 
   void onCreate() override {
@@ -81,7 +82,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
           if (s.traceAge[i] > TRACE_LIFE) s.traceNode[i] = -1;
         }
       traceTimer_ += float(dt);
-      if (!heroNodes_.empty() && traceTimer_ > 2.2f) {
+      if (!heroNodes_.empty() && traceTimer_ > TRACE_EVERY) {
         traceTimer_ = 0.f;
         const int node = heroNodes_[(heroCursor_++) % int(heroNodes_.size())];
         int freeSlot = -1, oldest = 0;

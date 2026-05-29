@@ -139,10 +139,10 @@ void HumanTrace::draw(Graphics& g, const Vec3f& nodePos, const Vec3f& camRight,
                 TL = nodePos - r + u, TR = nodePos + r + u;
     quad_.reset();
     quad_.primitive(Mesh::TRIANGLE_STRIP);
-    quad_.vertex(BL.x, BL.y, BL.z); quad_.texCoord(0.f, 0.f);
-    quad_.vertex(BR.x, BR.y, BR.z); quad_.texCoord(1.f, 0.f);
-    quad_.vertex(TL.x, TL.y, TL.z); quad_.texCoord(0.f, 1.f);
-    quad_.vertex(TR.x, TR.y, TR.z); quad_.texCoord(1.f, 1.f);
+    quad_.vertex(BL.x, BL.y, BL.z); quad_.texCoord(0.f, 1.f);   // v flipped (images were upside down)
+    quad_.vertex(BR.x, BR.y, BR.z); quad_.texCoord(1.f, 1.f);
+    quad_.vertex(TL.x, TL.y, TL.z); quad_.texCoord(0.f, 0.f);
+    quad_.vertex(TR.x, TR.y, TR.z); quad_.texCoord(1.f, 0.f);
     quad_.update();
     const int col = slot % grid_, row = slot / grid_;
     const float u0 = float(col) / grid_, u1 = float(col + 1) / grid_;
