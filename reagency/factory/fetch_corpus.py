@@ -24,10 +24,15 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
-UA = {"User-Agent": "WorldOfShadowWork/0.1 (MAT201B academic art project; lpfreiburg@ucsb.edu)"}
+UA = {
+    "User-Agent": "Mozilla/5.0 (compatible; WorldOfShadowWork/0.1; academic art project; lpfreiburg@ucsb.edu)",
+    "Accept": "image/jpeg,image/*,*/*;q=0.8",
+    "Referer": "https://www.artic.edu/",
+}
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CORPUS = os.path.join(ROOT, "corpus")
 
@@ -57,16 +62,31 @@ def get_json(url):
         return json.load(r)
 
 
-def download(url, path):
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=60) as r:
-        data = r.read()
-    if len(data) < 1200:          # too small to be a real image (likely an error page)
-        raise ValueError("suspiciously small response (%d bytes)" % len(data))
-    if data[:2] != b"\xff\xd8":   # JPEG magic
-        raise ValueError("not a JPEG")
-    with open(path, "wb") as f:
-        f.write(data)
+def download(url, path, retries=4):
+    # AIC's IIIF server throttles heavy runs with HTTP 403; retry with backoff.
+    last = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, headers=UA)
+            with urllib.request.urlopen(req, timeout=60) as r:
+                data = r.read()
+            if len(data) < 1200:          # too small to be a real image (likely an error page)
+                raise ValueError("suspiciously small response (%d bytes)" % len(data))
+            if data[:2] != b"\xff\xd8":   # JPEG magic
+                raise ValueError("not a JPEG")
+            with open(path, "wb") as f:
+                f.write(data)
+            return
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code in (403, 429, 500, 502, 503, 504):
+                time.sleep(1.0 + 1.5 * attempt)   # back off and retry (throttling)
+                continue
+            raise
+        except Exception as e:
+            last = e
+            time.sleep(0.5)
+    raise last if last else RuntimeError("download failed")
 
 
 def fetch_aic(theme, q, per_query, seen, rows):
@@ -98,7 +118,7 @@ def fetch_aic(theme, q, per_query, seen, rows):
                 download(img, path)
             except Exception as e:
                 print("   [AIC] dl error %s: %s" % (key, e)); continue
-            time.sleep(0.15)
+            time.sleep(0.25)
         seen.add(key)
         rows.append({
             "file": "images/%s/%s" % (theme, fn), "theme": theme, "query": q,
@@ -138,7 +158,7 @@ def fetch_cma(theme, q, per_query, seen, rows):
                 download(web, path)
             except Exception as e:
                 print("   [CMA] dl error %s: %s" % (key, e)); continue
-            time.sleep(0.15)
+            time.sleep(0.25)
         seen.add(key)
         creators = ", ".join(c.get("description", "") for c in (a.get("creators") or []))
         rows.append({
