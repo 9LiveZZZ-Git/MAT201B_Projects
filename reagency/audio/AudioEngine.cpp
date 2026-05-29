@@ -500,8 +500,9 @@ void AudioEngine::render(al::AudioIOData& io) {
       if (v.layer == 4) {                                  // whisper: lead (gated), and into the delay
         float pp = 0.5f * (v.pan + drift + 1.f); pp = pp < 0 ? 0 : (pp > 1 ? 1 : pp);
         float cL = std::cos(pp * 1.5707963f), cR = std::sin(pp * 1.5707963f);
-        leadL += whisperGate_ * 1.25f * s * cL; leadR += whisperGate_ * 1.25f * s * cR;        // drier + a touch louder
-        ppSendL += whisperGate_ * 0.12f * s * cL; ppSendR += whisperGate_ * 0.12f * s * cR; revSend += s * whisperGate_ * 0.35f;   // much less wet
+        leadL += whisperGate_ * 0.85f * s * cL; leadR += whisperGate_ * 0.85f * s * cR;          // lower
+        ppSendL += whisperGate_ * 0.12f * s * cL; ppSendR += whisperGate_ * 0.12f * s * cR; revSend += s * whisperGate_ * 0.7f;   // blend more with the global verb
+        sampSend += s * whisperGate_ * 0.6f;                                                     // short MONO reverb on the whisper
       } else if (v.layer == 9) { leadL += 1.05f * s; leadR += 1.05f * s; }   // "and" tick: dry, centred, un-ducked
       else if (v.layer == 6 || v.layer == 7) { lowMono += s; }
       else {

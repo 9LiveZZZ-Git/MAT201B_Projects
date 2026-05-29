@@ -16,6 +16,7 @@
 #include "viz/VesselSplats.hpp"
 #include "viz/HumanTrace.hpp"
 #include "viz/LabelLayer.hpp"
+#include "audio/AudioEngine.hpp"
 
 #include <cmath>
 #include <memory>
@@ -35,6 +36,8 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   VesselSplats  vessel;
   HumanTrace    trace;
   LabelLayer    labels;
+  AudioEngine   audio_;                       // primary-only generative voice (M5)
+  int           prevCurNode_ = -1;            // arrival edge-detect for audio events
   std::vector<int> heroNodes_;                // corpus image nodes that have an atlas thumbnail
   int           heroCursor_ = 0;
   float         traceTimer_ = 0.f;
@@ -57,12 +60,24 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     vessel.init(assetDir);
     trace.init(assetDir);
     labels.init(assetDir);
+    audio_.init(assetDir, audioIO().framesPerSecond());   // primary-only; scale from manifest.json
     for (int i = 0; i < field.count(); ++i)            // traceable corpus photos
       if (field.typeOf(i) == 0 && field.atlasOf(i) >= 0) heroNodes_.push_back(i);
     nav().pos().set(0.0, 0.0, 16.0);
     nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
     // Renderers must not take local nav input — the primary's pose is authoritative.
     if (!isPrimary()) navControl().active(false);
+  }
+
+  // Stereo pan in [-1,1] for a world point, from the camera's right axis (audio localization).
+  float panOf(const Vec3f& w) {
+    Vec3d d = Vec3d(w.x, w.y, w.z) - nav().pos();
+    double L = d.mag();
+    if (L < 1e-5) return 0.f;
+    d /= L;
+    Vec3d r = nav().quat().rotate(Vec3d(1, 0, 0));
+    double p = d.dot(r);
+    return float(p < -1 ? -1 : (p > 1 ? 1 : p));
   }
 
   void onAnimate(double dt) override {
@@ -82,13 +97,23 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       s.focusPos[0] = focus.x; s.focusPos[1] = focus.y; s.focusPos[2] = focus.z;
       s.vesselKf   = float(conductor.visits()) + conductor.progress();
 
+      // AUDIO: on each NEW node arrival, sound the node's note + ignite an arpeggio over its
+      // k-NN edges (the web "belongs-together" made audible). Pitch/timbre from type/density.
+      if (s.curNode != prevCurNode_ && s.curNode >= 0) {
+        audio_.onArrival(s.curNode, field.typeOf(s.curNode),
+                         field.densityOf(s.curNode), field.clusterOf(s.curNode));
+        const auto& adj = webs.adjacency();
+        if (s.curNode < int(adj.size())) audio_.igniteArp(adj[s.curNode], field.clusterOf(s.curNode));
+        prevCurNode_ = s.curNode;
+      }
+
       // Human trace ring: age + expire; surface a NEW photo on a steady cadence (round-robin
       // through the corpus's hero images) so the dissolve is ALWAYS on screen — not only when
       // the wander happens to land on one (which was far too rare to see).
       for (int i = 0; i < WoSWState::N_TRACE; ++i)
         if (s.traceNode[i] >= 0) {
           s.traceAge[i] += float(dt);
-          if (s.traceAge[i] > TRACE_LIFE) s.traceNode[i] = -1;
+          if (s.traceAge[i] > TRACE_LIFE) { audio_.traceOff(i); s.traceNode[i] = -1; }
         }
       traceTimer_ += float(dt);
       if (!heroNodes_.empty() && traceTimer_ > TRACE_EVERY) {
@@ -101,6 +126,13 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
         }
         const int slot = (freeSlot >= 0) ? freeSlot : oldest;
         s.traceNode[slot] = node; s.traceAge[slot] = 0.f;
+        // AUDIO: a warm presence at the photo + a synthesized vocal WHISPER of the word the
+        // machine classifies it as, which dissolves into a granular fade (twin of the photo's
+        // dissolve into grains). The word comes from LabelLayer (empty until the regen → a
+        // stable per-node pseudo-vocalisation is whispered instead).
+        const float tpan = panOf(field.posOf(node));
+        audio_.traceOn(slot, node, tpan);
+        audio_.whisper(labels.wordForNode(node), node, tpan);
       }
 
       // Depth tide: advance the phase, slowed by hesitation; map to depth that dwells near the
@@ -138,6 +170,11 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       s.navPos[0] = float(p.x); s.navPos[1] = float(p.y); s.navPos[2] = float(p.z);
       s.navQuat[0] = float(q.x); s.navQuat[1] = float(q.y);
       s.navQuat[2] = float(q.z); s.navQuat[3] = float(q.w);
+
+      // AUDIO continuous controls: hesitation -> timbre/reverb, depth -> bright<->dark morph,
+      // focus point -> stereo localization, progress -> (reserved). Also pumps the arpeggio.
+      audio_.update(float(dt), s.hesitation, s.depth, conductor.progress(),
+                    panOf(Vec3f(s.focusPos[0], s.focusPos[1], s.focusPos[2])));
     } else {
       // apply the primary's exact pose (Quatd is w,x,y,z)
       nav().pos().set(s.navPos[0], s.navPos[1], s.navPos[2]);
@@ -178,7 +215,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
 
     // The machine's CLASSIFICATION: floating word labels at the cluster centroids (a standing
     // map of what the machine thinks the imagery IS).
-    labels.drawClusters(g, camR, camU, 0.55f);
+    labels.drawClusters(g, camR, camU, 0.32f);     // words floating IN the galaxy, subtly
 
     // Human traces: photos surface at their node positions (multiple at once), dissolving into
     // grains that stream into the galaxy — and the word the machine classifies each as.
@@ -199,8 +236,8 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   }
 
   void onSound(AudioIOData& io) override {
-    if (!isPrimary()) return;          // primary-only audio (M0: silent)
-    (void)io;
+    if (!isPrimary()) return;          // primary-only audio
+    audio_.render(io);
   }
 };
 

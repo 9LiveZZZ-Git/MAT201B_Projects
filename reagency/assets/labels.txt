@@ -1,21 +1,36 @@
-0	3.067	-0.072	0.489	Brother Martin Clasping the Iron Hand of Goetz
-1	-5.912	0.065	0.019	will
-2	-0.409	0.349	-0.354	Mask
-3	0.067	0.303	-0.576	Hand Mirror
-4	1.731	-0.946	0.435	Text Page, Arabic Prose (verso) Text from The Book of Knowledge of Ingenious Mechanical Devices (Automata) of Inb al-Razza al-Jazari
-5	1.876	-0.915	0.376	Peacock-shaped Hand Washing Device (recto); Text Page, Arabic Prose (verso)
-6	-0.248	0.536	-0.631	Hand Mirror
-7	0.966	-0.383	-0.037	Hand Pavise for Foot Combat
-8	0.261	0.367	-0.776	Hand-held Teapot
-9	2.688	-0.065	0.397	Fortune and the Young Child
-10	2.324	0.169	0.065	Self-Portrait
-11	2.510	0.033	0.317	Fortune
-12	2.925	0.095	0.198	Self-Portrait with a Visor
-13	3.196	0.055	0.557	Fishing Boats with Hucksters Bargaining for Fish
-14	2.458	-1.405	0.653	Large wind-up automaton of Asahina Saburo
-15	0.410	0.223	-0.534	Wall Clock
-16	2.702	0.081	0.545	La Bonne Aventure (The Fortune Teller)
-17	-0.230	0.842	-0.519	Bodhisattva Maitreya with Fear-Not Gesture (Abhayamudra)
-18	-5.942	-0.029	-0.094	agency
-19	-0.131	0.266	-0.445	Hand Mirror
-20	3.117	-0.080	0.407	Self-Portrait
+2.957 0.128 0.174 3 cumplir
+2.980 -0.092 0.319 10 alentua
+2.578 0.014 0.316 17 instruction
+-0.156 0.344 -0.467 24 manya
+1.860 -0.904 0.364 31 trenirati
+2.982 0.137 0.160 38 acquitter
+-0.112 0.185 -0.379 45 ahjo
+3.192 -0.029 0.414 52 certificat
+0.957 -0.351 -0.018 59 selekcjonowanie
+3.225 0.022 0.353 64 sortator
+2.505 -1.451 0.649 65 rounder
+-0.322 0.623 -0.568 66 bijverdienste
+-0.266 0.314 -0.528 67 groller
+3.024 0.096 0.184 68 amoreggiare
+2.430 0.073 0.326 69 corresponder
+0.329 0.144 -0.538 70 salida
+2.733 0.091 0.576 71 comply
+1.105 -0.386 -0.039 72 acereria
+-0.110 0.574 -0.631 73 darbase
+-0.444 0.286 -0.269 74 agentspecial
+-0.270 0.284 -0.386 75 egzorcysta
+2.506 0.030 0.267 76 verkeersleiding
+2.398 -1.352 0.672 77 kebenaran
+2.386 -1.356 0.666 78 hoitolaitos
+2.726 -0.022 0.510 79 voyagiste
+1.708 -0.960 0.452 80 autokrik
+2.601 0.008 0.397 81 tasoittaa
+2.637 0.105 0.552 82 voorschrijven
+-0.143 0.417 -0.496 83 stocznia
+-0.032 0.278 -0.456 84 mengampul
+-5.889 -0.004 -0.063 85 borondate
+-6.051 -0.050 -0.173 86 peto
+-5.934 0.098 -0.029 87 boondoggle
+-5.934 0.187 0.112 88 nachtzicht
+-5.779 0.015 -0.094 89 acquirement
+-5.813 -0.035 -0.043 90 dlan
