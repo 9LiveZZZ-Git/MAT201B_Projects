@@ -164,6 +164,8 @@ def main():
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--no-atlas", action="store_true")
+    ap.add_argument("--no-modality-center", action="store_true",
+                    help="keep CLIP's image/text gap (words stay a separate disconnected cluster)")
     a = ap.parse_args()
     os.makedirs(a.assets, exist_ok=True)
 
@@ -171,6 +173,17 @@ def main():
     meta = json.load(open(os.path.join(a.work, "meta.json")))
     N = E.shape[0]
     print("[stage_b] %d points, dim %d" % (N, E.shape[1]))
+
+    # CLIP "modality gap": image and text embeddings sit in separate cones, so the words form
+    # a disconnected cluster. Center each modality (then re-normalize) so they integrate — the
+    # word "loom" lands among loom imagery and the webs cross modalities.
+    if not a.no_modality_center:
+        isw = np.array([m["type"] == "word" for m in meta])
+        if isw.any() and (~isw).any():
+            E[~isw] -= E[~isw].mean(0)
+            E[isw]  -= E[isw].mean(0)
+            E /= (np.linalg.norm(E, axis=1, keepdims=True) + 1e-9)
+            print("[stage_b] modality-centered (bridged the CLIP image/text gap)")
 
     coords = scale_coords(umap_3d(E, a.seed), a.radius)
     edges, density = knn_edges(E, a.k)
