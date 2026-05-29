@@ -29,7 +29,7 @@ int main() {
     cfg.lora_rank = 2; cfg.n_agents = 4;
     RavenBrain brain; brain.init(cfg);
 
-    Lens lens; lens.init(cfg.d_hidden);
+    TunedLens lens; lens.init(cfg.d_hidden);
 
     std::mt19937 rng(777);
     std::normal_distribution<float> nd(0.f, 1.f);

@@ -11,7 +11,7 @@ static constexpr float ADAM_B1   = 0.9f;
 static constexpr float ADAM_B2   = 0.999f;
 static constexpr float ADAM_EPS  = 1e-8f;
 
-void Lens::init(int d_hidden_) {
+void TunedLens::init(int d_hidden_) {
     d_hidden = d_hidden_;
     std::mt19937 rng(SEED_LENS);
     std::normal_distribution<float> nd(0.f, 1.f / std::sqrt(float(d_hidden)));
@@ -32,7 +32,7 @@ static void softmax(const float* z, int n, float* out) {
     for (int i = 0; i < n; ++i) out[i] *= inv;
 }
 
-void Lens::decode(const float* hidden, float* out_dist) const {
+void TunedLens::decode(const float* hidden, float* out_dist) const {
     float logit[LENS_ACT];
     for (int a = 0; a < LENS_ACT; ++a) {
         float acc = bp[a];
@@ -43,7 +43,7 @@ void Lens::decode(const float* hidden, float* out_dist) const {
     softmax(logit, LENS_ACT, out_dist);
 }
 
-float Lens::train_step(const float* hidden_flat, const float* target_flat, int N) {
+float TunedLens::train_step(const float* hidden_flat, const float* target_flat, int N) {
     if (N <= 0) return 0.f;
     const float invN = 1.f / float(N);
 
@@ -85,7 +85,7 @@ float Lens::train_step(const float* hidden_flat, const float* target_flat, int N
     return float(ce * invN);
 }
 
-ThoughtVector Lens::think(const float* hidden, float value, int dominant_goal) const {
+ThoughtVector TunedLens::think(const float* hidden, float value, int dominant_goal) const {
     ThoughtVector tv;
     decode(hidden, tv.action);
 

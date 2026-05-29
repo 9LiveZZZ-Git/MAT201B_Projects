@@ -28,7 +28,7 @@ struct ThoughtVector {
     int32_t  goal      = int(GoalKind::EXPLORE);  // dominant goal id
 };
 
-struct Lens {
+struct TunedLens {
     // probe weights: P[a * d_hidden + h], bias[a]
     int d_hidden = 0;
     std::vector<float> P;

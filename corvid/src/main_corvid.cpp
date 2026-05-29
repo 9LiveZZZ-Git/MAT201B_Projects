@@ -133,7 +133,7 @@ struct CorvidM1 : public DistributedAppWithState<CorvidVizState> {
 #endif
 
     // --- Part B: generative "thinking" visuals ---
-    Lens          lens;            // tuned-lens readout over RavenNet hidden acts
+    TunedLens     lens;            // tuned-lens readout over RavenNet hidden acts
     ThoughtVector thought;         // current focused-agent thought (drives visuals)
     Skybox        skybox;          // generative thinking skybox
     SplatModel    splats;          // distilled-student crow splat cloud
