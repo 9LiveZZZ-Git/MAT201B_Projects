@@ -1,6 +1,7 @@
 // Corvid M1/M2/M3 alpha demo — v0.4
 // Energy · Reproduction · Death · Place grid · Memory rings · RavenNet · Analysis HUD
 #include "al/app/al_App.hpp"
+#include "al/app/al_DistributedApp.hpp"
 #include "al/io/al_Imgui.hpp"
 #include "al/graphics/al_Shapes.hpp"
 #include "al/math/al_Random.hpp"
@@ -12,6 +13,7 @@
 #include "Gamma/Oscillator.h"
 
 #include "core/Agent.hpp"
+#include "core/CorvidVizState.hpp"
 #include "core/Memory.hpp"
 #include "core/MemoryRing.hpp"
 #include "core/Place.hpp"
@@ -71,7 +73,11 @@ public:
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
-struct CorvidM1 : App {
+// DistributedAppWithState: on the AlloSphere the primary (simulator) runs the
+// sim + RavenNet + lens and broadcasts CorvidVizState; renderer nodes draw from
+// it (Phase 10). On a single desktop the one node is primary and reads back its
+// own state, so behavior is identical to the standalone app.
+struct CorvidM1 : public DistributedAppWithState<CorvidVizState> {
     static constexpr int   N_POOL  = 256;
     static constexpr float W       = 10.f;
     static constexpr float HALF_W  = W * 0.5f;
@@ -400,8 +406,11 @@ struct CorvidM1 : App {
         gui << w_action;
 #endif
         gui << w_glow;
-        gui.init(0, 0, false);  // don't manage ImGui frame — we do it manually
-        imguiInit();
+        // GUI/ImGui only on the primary (desktop). Renderer nodes have no 2D GUI.
+        if (isPrimary()) {
+            gui.init(0, 0, false);  // don't manage ImGui frame — we do it manually
+            imguiInit();
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -409,6 +418,7 @@ struct CorvidM1 : App {
     // ---------------------------------------------------------------------------
     void onAnimate(double dt_d) override {
         float dt = float(dt_d);
+        if (isPrimary()) {
         sim_time += dt;
 
         // --- HUD sampling (1 Hz) ---
@@ -1076,44 +1086,103 @@ struct CorvidM1 : App {
             }
 #endif
         }
+            // primary publishes the frame for renderer nodes
+            packVizState();
+        }  // end if(isPrimary())
 
-        // --- Part B: evolve the crow splat cloud from the current thought ---
-        if (show_splats) splats.update(thought, sim_time, dt);
+        // --- all nodes: drive the generative visuals from broadcast state ---
+        // (primary echoes what it just wrote; replicas use the received blob)
+        thought = state().thought;
+        if (show_splats) splats.update(thought, state().sim_time, dt);
+    }
+
+    // Pack the live sim into the broadcast state (primary only).
+    void packVizState() {
+        state().tick++;
+        state().sim_time  = sim_time;
+        state().thought   = thought;
+        int n = 0, focus_out = -1;
+        for (int i = 0; i < N_POOL && n < VIZ_MAX_AGENTS; ++i) {
+            Agent& a = pool[i];
+            if (!a.live && a.flash_timer <= 0.f) continue;
+            AgentXform& x = state().xform[n];
+            auto& p = a.nav.pos();
+            x.pos[0] = float(p.x); x.pos[1] = float(p.y); x.pos[2] = float(p.z);
+            auto q = a.nav.quat();
+            x.quat[0] = float(q.x); x.quat[1] = float(q.y);
+            x.quat[2] = float(q.z); x.quat[3] = float(q.w);
+            x.lineage   = a.lineage_id;
+            x.energy    = a.energy;
+            x.flash     = a.flash_timer;
+            x.flashKind = a.flash_kind;
+            x.live      = a.live ? 1 : 0;
+            if (i == focus_slot) focus_out = n;
+            ++n;
+        }
+        state().n_agents  = n;
+        state().focus_idx = focus_out;
     }
 
     // ---------------------------------------------------------------------------
     // onDraw
     // ---------------------------------------------------------------------------
+    // Deterministic agent color from broadcast fields (same on every node).
+    Color agentColor(uint32_t lineage, float energy, float flash,
+                     int flashKind, bool live) {
+        float alpha = live ? 0.85f : (flash / 0.35f) * 0.7f;
+        if (live && flash > 0.f)
+            return flashKind == 0 ? Color(0.4f, 1.0f, 0.4f, alpha)   // birth
+                                  : Color(1.0f, 0.2f, 0.1f, alpha);  // death
+        if (!live) return Color(1.0f, 0.2f, 0.1f, alpha);
+        float hue = std::fmod(float(lineage) * 137.508f, 360.f) / 360.f;
+        float bright = energy * 0.85f + 0.15f;
+        float h6 = hue * 6.f; int hi = int(h6) % 6; float f = h6 - int(h6);
+        float p = bright*0.2f, q = bright*(1.f-f*0.7f), t = bright*(1.f-(1.f-f)*0.7f);
+        float r, gg, b;
+        switch (hi) {
+            case 0: r=bright; gg=t;      b=p;      break;
+            case 1: r=q;      gg=bright; b=p;      break;
+            case 2: r=p;      gg=bright; b=t;      break;
+            case 3: r=p;      gg=q;      b=bright; break;
+            case 4: r=t;      gg=p;      b=bright; break;
+            default:r=bright; gg=p;      b=q;      break;
+        }
+        return Color(r, gg, b, alpha);
+    }
+
     void onDraw(Graphics& g) override {
         g.clear(0.0f, 0.0f, 0.0f);
 
         // --- Part B: generative "thinking" skybox (draw first, behind all) ---
+        // Driven by broadcast thought + time so every dome node matches.
         if (show_skybox && skybox.ready())
-            skybox.draw(g, nav().pos(), thought, sim_time);
+            skybox.draw(g, nav().pos(), state().thought, state().sim_time);
 
         g.blending(true);
         g.blendTrans();
         g.depthTesting(true);
 
-        // --- entities ---
+        // --- entities + place grid: primary-only (not broadcast) ---
+        if (isPrimary())
         for (auto& e : entities)
             e->draw(g);
 
         // --- Part B: crow splat cloud, anchored on the focused corvid ---
         if (show_splats && splats.ready()) {
             Vec3f c(0, 0, 0);
-            if (focus_slot >= 0 && pool[focus_slot].live) {
-                auto& p = pool[focus_slot].nav.pos();
-                c = Vec3f(float(p.x), float(p.y), float(p.z));
+            int fi = state().focus_idx;
+            if (fi >= 0 && fi < state().n_agents) {
+                const auto& x = state().xform[fi];
+                c = Vec3f(x.pos[0], x.pos[1], x.pos[2]);
             }
             splats.draw(g, c, 1.6f);
         }
 
-        // --- place grid novelty heat map (M2 visualizer) ---
+        // --- place grid novelty heat map (M2 visualizer; primary only) ---
         // Layer 1: translucent solid voxels scaled by novelty (heat map fill).
         // Layer 2: thin wireframe edges for high-novelty cells.
         // Color: cyan = net positive valence (food/birth), orange = negative (death/predator).
-        {
+        if (isPrimary()) {
             const float cell = W / float(PLACE_GRID_N);
             Mesh cube_solid{Mesh::TRIANGLES};
             addCube(cube_solid);
