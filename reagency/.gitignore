@@ -9,3 +9,9 @@ factory/work/
 # committed on purpose — they are a few MB and this is how they reach the Mac preview
 # and every AlloSphere render node via `git pull`, instead of per-node scp. Regenerate
 # anytime with factory/make_assets.sh.
+#
+# The repo-root .gitignore has a blanket `assets/` rule (for build output); the
+# negation below re-includes THIS project's data assets, which are intentionally
+# tracked. Without it `git add reagency/assets` silently adds nothing.
+!assets/
+!assets/**
