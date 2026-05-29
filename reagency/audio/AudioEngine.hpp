@@ -53,9 +53,12 @@ class AudioEngine {
   Role rBass_, rPluck_, rBell_, rTrace_, rTimp_, rMetal_;
   void loadSamples(const std::string& assetDir);
   int  pickSample(Role& r, float hz);
+  void loadWords(const std::string& assetDir);            // real on-theme words for the whisper
+  std::vector<std::string> wordbank_;
+  uint32_t wprng_ = 0xC0FFEEu;
 
   // ---------- lock-free event ring (SPSC) ----------
-  struct Ev { int kind; float hz, amp, pan; int layer, islot; float a, b, c; };
+  struct Ev { int kind; float hz, amp, pan; int layer, islot; float a, b, c; int vow = 0; };  // vow = packed vowel sequence
   enum { EV_NOTE = 0, EV_TRACE_ON = 1, EV_TRACE_OFF = 2, EV_WHISPER = 3, EV_RHYTHM = 4, EV_RHYTHM2 = 5 };
   static constexpr int RING = 1024;
   std::array<Ev, RING>  ring_{};
@@ -100,6 +103,7 @@ class AudioEngine {
     int   K = 5; float pm[6] = {1,2,3,4,5,6}, pa[6] = {0}; float pnorm = 1.f;
     float fmt[3] = {500, 1500, 2500}, fcoef[3][3] = {}, fz_[3][2] = {};
     int   syl = 2; float body = 0.6f; uint32_t grng = 0x2545F491u;
+    int   vowels[5] = {5, 5, 5, 5, 5}; int curSyl = -1;   // word's vowel sequence + current syllable
   };
   static constexpr int NVOX = 160;
   std::array<Voice, NVOX> vox_{};

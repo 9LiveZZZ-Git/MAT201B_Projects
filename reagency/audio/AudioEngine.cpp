@@ -124,9 +124,21 @@ float AudioEngine::jiBassHz() const { return cClusterRoot_.load(std::memory_orde
 bool AudioEngine::push(const Ev& e) { uint32_t h = rHead_.load(std::memory_order_relaxed), nx = (h + 1) % RING; if (nx == rTail_.load(std::memory_order_acquire)) return false; ring_[h] = e; rHead_.store(nx, std::memory_order_release); return true; }
 bool AudioEngine::pop(Ev& e) { uint32_t t = rTail_.load(std::memory_order_relaxed); if (t == rHead_.load(std::memory_order_acquire)) return false; e = ring_[t]; rTail_.store((t + 1) % RING, std::memory_order_release); return true; }
 
+void AudioEngine::loadWords(const std::string& assetDir) {
+  const std::string bases[] = { assetDir, "assets", "../../assets", "reagency/assets", "MAT201B_Projects/reagency/assets" };
+  for (const auto& b : bases) {
+    FILE* f = std::fopen((b + "/words.txt").c_str(), "r"); if (!f) continue;
+    char line[256];
+    while (std::fgets(line, sizeof(line), f)) { std::string w(line); while (!w.empty() && (w.back() == '\n' || w.back() == '\r' || w.back() == ' ')) w.pop_back(); if (w.size() >= 2) wordbank_.push_back(w); }
+    std::fclose(f);
+    if (!wordbank_.empty()) { std::fprintf(stderr, "[wosw audio] %zu whisper words from %s/words.txt\n", wordbank_.size(), b.c_str()); return; }
+  }
+  std::fprintf(stderr, "[wosw audio] words.txt not found — whisper uses per-node pseudo-vowels\n");
+}
+
 void AudioEngine::init(const std::string& assetDir, double sampleRate) {
   sr_ = sampleRate > 0 ? sampleRate : 44100.0;
-  loadManifest(assetDir); loadSamples(assetDir);
+  loadManifest(assetDir); loadSamples(assetDir); loadWords(assetDir);
   reverb_.bandwidth(0.9f); reverb_.damping(0.45f); reverb_.decay(0.9f);
   sampRev_.bandwidth(0.9f); sampRev_.damping(0.55f); sampRev_.decay(0.42f);   // short room for the samples
   cClusterRoot_.store(root_, std::memory_order_relaxed); subHz_ = root_ * 0.25f;
@@ -142,6 +154,8 @@ static void formantFor(char vowel, float& f0, float& f1, float& f2) {
     case 'i': f0 = 320; f1 = 2300; f2 = 3000; break; case 'o': f0 = 450; f1 = 850; f2 = 2800; break;
     case 'u': f0 = 325; f1 = 700; f2 = 2600; break; default: f0 = 500; f1 = 1500; f2 = 2500; break; }
 }
+static int vowelIndex(char c) { switch (std::tolower((unsigned char)c)) { case 'a': return 0; case 'e': return 1; case 'i': return 2; case 'o': return 3; case 'u': return 4; default: return -1; } }
+static void formantForIdx(int i, float& f0, float& f1, float& f2) { static const char v[6] = {'a', 'e', 'i', 'o', 'u', 'x'}; formantFor(v[(i < 0 || i > 5) ? 5 : i], f0, f1, f2); }
 static uint32_t euclidMask(int k, int n) { if (n <= 0) return 1u; if (k < 1) k = 1; if (k > n) k = n; uint32_t mask = 0; int prev = -1; for (int i = 0; i < n; ++i) { int cur = (i * k) / n; if (cur != prev) { mask |= 1u << i; prev = cur; } } return mask; }
 static float slotRate(float depth, float hes, float act) { float r = (1.6f + 1.3f * depth) * (1.f - 0.28f * hes) * (1.f + 0.20f * act); return r < 0.5f ? 0.5f : (r > 4.5f ? 4.5f : r); }
 
@@ -177,13 +191,17 @@ void AudioEngine::igniteArp(const std::vector<std::pair<int, float>>& nbrs, int 
 void AudioEngine::traceOn(int slot, int node, float pan) { if (!ready()) return; Ev e{}; e.kind = EV_TRACE_ON; e.layer = 3; e.hz = degHz(nodeDegree(node, 0)) * 0.5f; e.amp = 0.12f; e.pan = pan; e.islot = slot; push(e); }
 void AudioEngine::traceOff(int slot) { if (ready()) { Ev e{}; e.kind = EV_TRACE_OFF; e.islot = slot; push(e); } }
 void AudioEngine::whisper(const std::string& word, int node, float pan) {
-  if (!ready()) return; int syl = 0, firstV = -1;
-  for (char c : word) { char l = char(std::tolower((unsigned char)c)); if (l=='a'||l=='e'||l=='i'||l=='o'||l=='u') { if (firstV<0) firstV=l; ++syl; } }
-  float f0, f1, f2;
-  if (word.empty() || syl == 0) { static const char vs[5] = {'a','e','i','o','u'}; formantFor(vs[(node>=0?node:0)%5], f0, f1, f2); syl = (node>=0?node:0)%3+1; } else formantFor(char(firstV), f0, f1, f2);
-  syl = syl < 1 ? 1 : (syl > 5 ? 5 : syl);
+  if (!ready()) return;
+  std::string w = word;                                       // a real word — given per-image label, or picked
+  if (w.empty() && !wordbank_.empty()) { wprng_ ^= wprng_ << 13; wprng_ ^= wprng_ >> 17; wprng_ ^= wprng_ << 5; w = wordbank_[wprng_ % wordbank_.size()]; }
+  int vidx[5], nv = 0, firstV = -1;
+  for (char c : w) { int vi = vowelIndex(c); if (vi >= 0) { if (firstV < 0) firstV = vi; if (nv < 5) vidx[nv++] = vi; } }
+  if (nv == 0) { int v0 = (node >= 0 ? node : 0) % 5; nv = (node >= 0 ? node : 0) % 3 + 1; for (int i = 0; i < nv; ++i) vidx[i] = v0; firstV = v0; }
+  int syl = nv < 1 ? 1 : (nv > 5 ? 5 : nv), vow = 0;
+  for (int i = 0; i < syl; ++i) vow |= (vidx[i] & 7) << (3 * i);
+  float f0, f1, f2; formantForIdx(firstV, f0, f1, f2);
   cFmt0_.store(f0, std::memory_order_relaxed); cFmt1_.store(f1, std::memory_order_relaxed); cFmt2_.store(f2, std::memory_order_relaxed);  // -> talking growl
-  Ev e{}; e.kind = EV_WHISPER; e.layer = 4; e.amp = 0.48f; e.pan = pan; e.islot = syl; e.a = f0; e.b = f1; e.c = f2; push(e);
+  Ev e{}; e.kind = EV_WHISPER; e.layer = 4; e.amp = 0.48f; e.pan = pan; e.islot = syl; e.vow = vow; e.a = f0; e.b = f1; e.c = f2; push(e);
 }
 void AudioEngine::update(float dt, float hesitation, float depth, float progress, float focusPan) {
   if (!ready()) return; depth = clamp01(depth);
@@ -273,8 +291,8 @@ void AudioEngine::trigger(const Ev& e) {
     case 7: { v.life = 0.9f; v.atk = 0.003f; int s = pickSample(rTimp_, v.hz); if (s >= 0) setSample(s); else setPartials(4, 0.02f); break; }   // pitched timpani
     case 8: { v.life = 1.7f; v.atk = 0.001f; int s = pickSample(rMetal_, v.hz);                                                                  // industrial clang
               if (s >= 0) setSample(s); else { v.K = 5; float mr[5] = {1.f, 2.76f, 5.40f, 8.93f, 13.3f}; v.pnorm = 0.f; for (int k = 0; k < 5; ++k) { v.pm[k] = mr[k]; v.pa[k] = 1.f / std::pow(k + 1.f, 0.8f); v.pnorm += v.pa[k]; } } break; }
-    case 4: { v.syl = e.islot < 1 ? 1 : e.islot; v.life = 1.5f + 0.55f * v.syl; v.body = 0.62f; v.atk = 0.09f; v.fmt[0] = e.a; v.fmt[1] = e.b; v.fmt[2] = e.c;
-              const float bw[3] = {90.f, 110.f, 140.f}; for (int k = 0; k < 3; ++k) { float r = std::exp(-kPI*bw[k]/float(sr_)); v.fcoef[k][0]=(1.f-r); v.fcoef[k][1]=-2.f*r*std::cos(kTAU*v.fmt[k]/float(sr_)); v.fcoef[k][2]=r*r; } break; }
+    case 4: { v.syl = e.islot < 1 ? 1 : (e.islot > 5 ? 5 : e.islot); v.life = 1.5f + 0.55f * v.syl; v.body = 0.62f; v.atk = 0.09f; v.curSyl = -1;
+              for (int i = 0; i < 5; ++i) v.vowels[i] = (e.vow >> (3 * i)) & 7; break; }   // formants set per-syllable in tickVoice
     default: v.life = 0.15f; v.atk = 0.01f; setPartials(2, 0.f); break;
   }
 }
@@ -287,7 +305,12 @@ float AudioEngine::tickVoice(Voice& v, float isr, float depth, float bright) {
   if (v.smp) { if (v.smpPos >= v.smpLen - 2) { v.on = false; return 0.f; } int i0 = int(v.smpPos); float fr = v.smpPos - i0; float s = v.smp[i0]*(1.f-fr) + v.smp[i0+1]*fr; v.smpPos += v.smpRate;
     float env; if (v.layer == 3 || v.layer == 5) env = (u < (v.atk/v.life)) ? (u/std::max(1e-4f, v.atk/v.life)) : (u < 0.6f ? 1.f : std::max(0.f, 1.f-(u-0.6f)/0.4f));
     else { float a = v.atk/v.life; env = (u < a) ? (u/std::max(1e-4f,a)) : (u > 0.85f ? (1.f-(u-0.85f)/0.15f) : 1.f); } return s * env * v.amp; }
-  if (v.layer == 4) { float env;
+  if (v.layer == 4) {
+    // step the formant resonators through the word's vowels (speech-like synthesis)
+    int sk = (u < v.body) ? int((u / v.body) * float(v.syl)) : (v.syl - 1); if (sk < 0) sk = 0; if (sk >= v.syl) sk = v.syl - 1;
+    if (sk != v.curSyl) { v.curSyl = sk; formantForIdx(v.vowels[sk], v.fmt[0], v.fmt[1], v.fmt[2]);
+      const float bw[3] = {90.f, 110.f, 140.f}; for (int k = 0; k < 3; ++k) { float r = std::exp(-kPI*bw[k]/float(sr_)); v.fcoef[k][0]=(1.f-r); v.fcoef[k][1]=-2.f*r*std::cos(kTAU*v.fmt[k]/float(sr_)); v.fcoef[k][2]=r*r; } }
+    float env;
     if (u < v.body) { float t = u/v.body, ph = t*float(v.syl), frac = ph-std::floor(ph); env = std::pow(0.5f-0.5f*std::cos(kTAU*frac), 0.6f)*std::sin(kPI*t); }
     else { float t = (u-v.body)/(1.f-v.body), gp = t*(6.f+10.f*t), gf = gp-std::floor(gp), duty = 0.6f*(1.f-t); float grain = (gf<duty)?(0.5f-0.5f*std::cos(kTAU*gf/std::max(1e-3f,duty))):0.f; env = grain*(1.f-t); }
     float nz = vrand(v.grng)*2.f-1.f, s = 0.f; const float w[3] = {1.f, 0.7f, 0.45f};
@@ -327,7 +350,7 @@ void AudioEngine::render(al::AudioIOData& io) {
   padBloom_ += ((0.30f + 0.70f * depth) - padBloom_) * gco(0.6f, nf, sr_);
   reverbWet_ += (clamp01(0.42f + 0.16f * (1.f - depth) + 0.10f * hes + 0.14f * mw) - reverbWet_) * gco(0.6f, nf, sr_);   // more global reverb
   subAmp_   += ((0.125f + 0.15f * (1.f - depth)) - subAmp_) * gco(7.f, nf, sr_);   // bass +~5 dB
-  shepGain_ += ((0.020f + 0.012f * depth + 0.010f * tension_) - shepGain_) * gco(1.f, nf, sr_);   // tamed: down ~6 dB
+  shepGain_ += ((0.011f + 0.007f * depth + 0.006f * tension_) - shepGain_) * gco(1.f, nf, sr_);   // tamed, -5 dB more
   shepRateTgt_ = (hes > 0.55f ? -1.f : 1.f) * (1.f / (80.f - 40.f * hes)); shepRate_ += (shepRateTgt_ - shepRate_) * gco(8.f, nf, sr_);   // near-static (~80 s/cycle)
   bool whisperOn = false; for (auto& v : vox_) if (v.on && v.layer == 4) { whisperOn = true; break; }
   duckGain_ += ((whisperOn ? 0.6f : 1.f) - duckGain_) * gco(0.25f, nf, sr_);
