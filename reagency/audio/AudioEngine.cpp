@@ -328,7 +328,7 @@ float AudioEngine::tickVoice(Voice& v, float isr, float depth, float bright) {
 void AudioEngine::fireKick() { Ev e{}; e.kind = EV_NOTE; e.layer = 6; e.hz = jiBassHz(); e.amp = (euStep_ == 0) ? 0.55f : 0.38f; e.pan = 0.f; schedule(e); }
 void AudioEngine::fireTimp() { timpDeg_ = (timpDeg_ + 1 + int(frand() * 2.f)) % (modeN_ * 2); Ev e{}; e.kind = EV_NOTE; e.layer = 7; e.hz = degHz(timpDeg_) * 0.5f; e.amp = 0.24f; e.pan = 0.18f * (2.f * frand() - 1.f); schedule(e); }
 void AudioEngine::fireClang() { Ev e{}; e.kind = EV_NOTE; e.layer = 8; e.hz = 60.f + 200.f * frand(); e.amp = 0.14f + 0.10f * frand(); e.pan = 0.8f * (2.f * frand() - 1.f); schedule(e); }
-void AudioEngine::fireAnd() { int i = allocCapped(9, 3); if (i < 0) return; Voice& v = vox_[i]; v = Voice{}; v.on = true; v.layer = 9; v.life = 0.05f; v.age = 0.f; v.amp = 0.07f; v.pan = 0.1f * (2.f * frand() - 1.f); v.grng = rng_ ^ uint32_t(i * 668265263u); }
+void AudioEngine::fireAnd() { int i = allocCapped(9, 3); if (i < 0) return; Voice& v = vox_[i]; v = Voice{}; v.on = true; v.layer = 9; v.life = 0.05f; v.age = 0.f; v.amp = 0.11f; v.pan = 0.1f * (2.f * frand() - 1.f); v.grng = rng_ ^ uint32_t(i * 668265263u); }
 
 void AudioEngine::render(al::AudioIOData& io) {
   const int nf = int(io.framesPerBuffer()), nch = int(io.channelsOut());
@@ -439,7 +439,8 @@ void AudioEngine::render(al::AudioIOData& io) {
     float ttgt = padRoot * 0.25f; if (ttgt > 35.f) ttgt = 35.f;          // 35 Hz and below
     triHz_ += (ttgt - triHz_) * 0.0004f; triPhase_ += triHz_ * isr; if (triPhase_ >= 1.f) triPhase_ -= 1.f;
     kickDuck_ += (1.f - kickDuck_) * 0.00025f;                            // recover (~90 ms) from the kick duck
-    lowMono += (4.f * std::fabs(triPhase_ - 0.5f) - 1.f) * 0.45f * kickDuck_;
+    float subPulse = 0.8f + 0.2f * (0.5f + 0.5f * std::cos(kTAU * euPhase_));   // subtle slow pulse on the beat
+    lowMono += (4.f * std::fabs(triPhase_ - 0.5f) - 1.f) * 0.45f * kickDuck_ * subPulse;
 
     // MOVING JI drone: per-partial slow tremolo + detune drift + vibrato
     for (int p = 0; p < PADN; ++p) {
@@ -498,13 +499,14 @@ void AudioEngine::render(al::AudioIOData& io) {
         float cL = std::cos(pp * 1.5707963f), cR = std::sin(pp * 1.5707963f);
         leadL += whisperGate_ * 1.05f * s * cL; leadR += whisperGate_ * 1.05f * s * cR;
         ppSendL += whisperGate_ * 0.5f * s * cL; ppSendR += whisperGate_ * 0.5f * s * cR; revSend += s * whisperGate_ * 1.4f;
-      } else if (v.layer == 9) { leadL += 0.8f * s; leadR += 0.8f * s; }   // "and" tick: dry, centred, un-ducked
+      } else if (v.layer == 9) { leadL += 1.05f * s; leadR += 1.05f * s; }   // "and" tick: dry, centred, un-ducked
       else if (v.layer == 6 || v.layer == 7) { lowMono += s; }
       else {
         float pan = v.pan + (v.layer == 2 || v.layer == 8 ? drift : 0.f); float pp = 0.5f * (pan + 1.f); pp = pp < 0 ? 0 : (pp > 1 ? 1 : pp);
         float cL = std::cos(pp * 1.5707963f), cR = std::sin(pp * 1.5707963f);
         bool up = (v.layer <= 2 || v.layer == 8);            // upper part: pluck/bell/grain/clang
         float dryg = up ? 0.72f : 1.f, rv = up ? 1.25f : 0.5f;   // pushed back + further into reverb
+        if (v.smp) { dryg = 1.35f; rv = 0.7f; }              // bring the CC0 SAMPLES out front
         bedL += dryg * s * cL; bedR += dryg * s * cR; revSend += s * rv;
         if (v.layer == 2) { ppSendL += 0.55f * s * cL; ppSendR += 0.55f * s * cR; }   // grains -> delay
         if (v.smp) sampSend += s;                                                     // CC0 samples -> short reverb
