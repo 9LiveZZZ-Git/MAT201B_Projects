@@ -1,0 +1,4 @@
+World of Shadow Work — CC0 instrument samples
+Source: Versilian Community Sample Library (VCSL) — https://github.com/sgossner/VCSL
+License: CC0 1.0 (Public Domain Dedication)
+Processed to mono / 16-bit / 32 kHz, peak-normalized.
