@@ -54,16 +54,43 @@ def main():
             nltk.download(pkg)
     from nltk.corpus import wordnet as wn
 
-    langs = wn.langs() if a.langs == "all" else [s.strip() for s in a.langs.split(",")]
+    # nltk's wn.langs() frequently under-reports OMW to just ['eng'] even when the multilingual
+    # data is present (lemma_names(lang) still works). So for "all" we use the known OMW-1.4 set.
+    OMW_LANGS = ["eng", "fra", "spa", "ita", "jpn", "cmn", "nld", "pol", "por", "cat", "eus", "fin",
+                 "heb", "ind", "zsm", "arb", "bul", "dan", "ell", "fas", "hrv", "isl", "nob", "nno",
+                 "ron", "slk", "slv", "swe", "tha", "glg", "als", "lit"]
+    if a.langs == "all":
+        langs = wn.langs()
+        if len(langs) < 2:
+            langs = OMW_LANGS
+    else:
+        langs = [s.strip() for s in a.langs.split(",")]
     print("[words] languages: %d (%s%s)" % (len(langs), ",".join(langs[:8]),
                                             " ..." if len(langs) > 8 else ""))
 
     def expand(synset, depth):
+        # skip proper-noun INSTANCES (named agencies / people / places / orgs) — these are what
+        # dragged the vocabulary off-theme ("Air Combat Command", "AFISR", "A. E. W. Mason").
+        if synset.instance_hypernyms():
+            return set()
         pool = {synset}
         if depth > 0:
             for h in synset.hyponyms():
                 pool |= expand(h, depth - 1)
         return pool
+
+    def ok(w):
+        # keep multilingual common words; drop acronyms / abbreviations / numbered / over-long.
+        if not (1 < len(w) <= 28):
+            return False
+        if any(c.isdigit() for c in w) or "." in w:
+            return False
+        if w.isascii() and w.isupper():            # ASCII all-caps acronym (ATM, ARDA, ACC)
+            return False
+        parts = w.split()                          # ASCII Title-Case multi-word = proper noun
+        if len(parts) >= 2 and w.isascii() and all(p[:1].isupper() for p in parts if p):
+            return False                           # (Air Force, American Dream, Census Bureau)
+        return True
 
     words = set()
     for theme, seeds in SEEDS.items():
@@ -76,7 +103,7 @@ def main():
                     try:
                         for lemma in s.lemma_names(lang):
                             w = lemma.replace("_", " ").strip()
-                            if w and 1 < len(w) <= 40:
+                            if ok(w):
                                 words.add(w)
                     except Exception:
                         pass
