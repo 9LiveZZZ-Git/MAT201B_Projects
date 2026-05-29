@@ -29,6 +29,10 @@ struct ParticleField {
   int  count()      const { return n_; }
   bool loadedReal() const { return loaded_real_; }
 
+  // Galaxy points for WebRenderer / Conductor (copied once at init).
+  std::vector<al::Vec3f> positions() const;
+  std::vector<al::Vec3f> colors() const;
+
  private:
   struct P {
     al::Vec3f pos, col;

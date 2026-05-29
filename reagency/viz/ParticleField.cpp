@@ -170,4 +170,16 @@ void ParticleField::draw(Graphics& g, float pointScale) {
   g.depthTesting(true);
 }
 
+std::vector<Vec3f> ParticleField::positions() const {
+  std::vector<Vec3f> v; v.reserve(pts_.size());
+  for (const auto& p : pts_) v.push_back(p.pos);
+  return v;
+}
+
+std::vector<Vec3f> ParticleField::colors() const {
+  std::vector<Vec3f> v; v.reserve(pts_.size());
+  for (const auto& p : pts_) v.push_back(p.col);
+  return v;
+}
+
 }  // namespace wosw

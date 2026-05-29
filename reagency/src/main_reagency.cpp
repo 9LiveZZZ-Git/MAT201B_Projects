@@ -10,6 +10,7 @@
 
 #include "core/WoSWState.hpp"
 #include "viz/ParticleField.hpp"
+#include "viz/WebRenderer.hpp"
 
 #include <cmath>
 #include <memory>
@@ -23,10 +24,12 @@ using namespace wosw;
 // node is primary, so this is also the dev/preview app.
 struct WoSW : public DistributedAppWithState<WoSWState> {
   ParticleField field;
+  WebRenderer   webs;
   std::string   assetDir = "assets";
 
   void onCreate() override {
     field.init(assetDir);
+    webs.init(assetDir, field.positions(), field.colors());
     nav().pos().set(0.0, 0.0, 16.0);
     nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
     // Renderers must not take local nav input — the primary's pose is authoritative.
@@ -57,6 +60,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
 
   void onDraw(Graphics& g) override {
     g.clear(0.03f, 0.03f, 0.05f);     // subtly-lifted void (reads better in the dome)
+    webs.draw(g);                     // similarity webs under the points
     field.draw(g, 1.f);
   }
 

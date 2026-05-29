@@ -20,6 +20,7 @@ set(app_include_dirs
 # Companion translation units main_reagency.cpp depends on.
 set(_reagency_lib_srcs
     "${REAGENCY_ROOT}/viz/ParticleField.cpp"
+    "${REAGENCY_ROOT}/viz/WebRenderer.cpp"
 )
 
 if(NOT TARGET reagency_support)
