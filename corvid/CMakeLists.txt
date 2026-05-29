@@ -67,7 +67,8 @@ add_executable(corvid_m1
     cognition/RavenBrain.cpp
     cognition/LlmReflection.cpp
     cognition/Lens.cpp
-    viz/Skybox.cpp)
+    viz/Skybox.cpp
+    viz/SplatModel.cpp)
 target_link_libraries(corvid_m1 PRIVATE al Threads::Threads)
 # RavenNet (hand-rolled) and threaded procedural reflection are always on now.
 target_compile_definitions(corvid_m1 PRIVATE CORVID_USE_RAVENNET CORVID_USE_LLM)

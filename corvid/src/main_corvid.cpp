@@ -29,9 +29,18 @@
 #include "environment/BoulderObstacle.hpp"
 #include "environment/HawkPredator.hpp"
 
+// Part B — native generative visualization
+#include "cognition/Lens.hpp"
+#include "viz/Skybox.hpp"
+#include "viz/SplatModel.hpp"
+
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <filesystem>
 #include <memory>
+#include <string>
 #include <vector>
 
 using namespace al;
@@ -116,6 +125,16 @@ struct CorvidM1 : App {
     int                          reflect_rr_   = 0; // round-robin cursor
     bool                         llm_ready_    = false;
 #endif
+
+    // --- Part B: generative "thinking" visuals ---
+    Lens          lens;            // tuned-lens readout over RavenNet hidden acts
+    ThoughtVector thought;         // current focused-agent thought (drives visuals)
+    Skybox        skybox;          // generative thinking skybox
+    SplatModel    splats;          // distilled-student crow splat cloud
+    int           focus_slot = -1; // agent whose mind we visualize
+    bool          show_skybox = true;
+    bool          show_splats = true;
+    Parameter     w_glow{"Glow", "Visuals", 1.0f, 0.f, 3.f};
 
     // --- entities ---
     std::vector<std::unique_ptr<Entity>> entities;
@@ -293,6 +312,38 @@ struct CorvidM1 : App {
             }
         }
 #endif
+        // --- Part B: tuned lens + generative visuals ---
+        // Crow images live in assets/crows/ (resolved relative to project root,
+        // matching how run.sh / corvid binaries are launched).
+        const char* crow_dir_candidates[] = {
+            "assets/crows", "../../assets/crows", "../../../assets/crows",
+            "MAT201B_Projects/corvid/assets/crows",
+        };
+        std::string crow_dir, crow_one;
+        for (auto* c : crow_dir_candidates) {
+            if (std::filesystem::exists(c)) { crow_dir = c; break; }
+        }
+        if (!crow_dir.empty()) {
+            for (auto& e : std::filesystem::directory_iterator(crow_dir)) {
+                auto ext = e.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                if (ext == ".jpg" || ext == ".jpeg" || ext == ".png") {
+                    crow_one = e.path().string();
+                    break;
+                }
+            }
+        }
+#ifdef CORVID_USE_RAVENNET
+        lens.init(brain.cfg.d_hidden);
+#else
+        lens.init(128);
+#endif
+        if (!skybox.init(crow_dir, 60.f))
+            std::fprintf(stderr, "[corvid] skybox shader failed to compile\n");
+        std::string student = crow_dir.empty() ? "" : (crow_dir + "/student.bin");
+        if (!splats.init(crow_one, student, 4000))
+            std::fprintf(stderr, "[corvid] splat shader failed to compile\n");
+
         // Build tetrahedron mesh once
         addTetrahedron(tetra_m);
 
@@ -348,6 +399,7 @@ struct CorvidM1 : App {
 #ifdef CORVID_USE_RAVENNET
         gui << w_action;
 #endif
+        gui << w_glow;
         gui.init(0, 0, false);  // don't manage ImGui frame — we do it manually
         imguiInit();
     }
@@ -876,6 +928,41 @@ struct CorvidM1 : App {
                     has_prev[s]     = true;
                 }
 
+                // --- Part B: tuned-lens readout (Phase 6) ---
+                // Re-run forward exposing hidden activations, train the lens to
+                // match the policy head, and build the focused agent's thought.
+                {
+                    const int dH = brain.cfg.d_hidden, dA = brain.cfg.d_action;
+                    std::vector<float> hidden(size_t(Nb) * dH);
+                    brain.forward_tap(obs_batch.data(), slot_idx.data(), Nb,
+                                      nullptr, nullptr, hidden.data());
+                    // targets = policy-head softmax per sample
+                    std::vector<float> target(size_t(Nb) * dA);
+                    for (int k = 0; k < Nb; ++k) {
+                        const float* lg = &biases[k * dA];
+                        float mx = lg[0];
+                        for (int d = 1; d < dA; ++d) mx = std::max(mx, lg[d]);
+                        float sum = 0.f;
+                        for (int d = 0; d < dA; ++d) { float e = std::exp(lg[d]-mx); target[k*dA+d]=e; sum+=e; }
+                        for (int d = 0; d < dA; ++d) target[k*dA+d] /= (sum + 1e-20f);
+                    }
+                    if (dA == LENS_ACT)
+                        lens.train_step(hidden.data(), target.data(), Nb);
+
+                    // choose focus = first live slot in the batch (stable enough)
+                    focus_slot = live_slots.empty() ? -1 : live_slots[0];
+                    if (focus_slot >= 0) {
+                        // find this slot's row in the batch
+                        int fk = 0;
+                        for (int k = 0; k < Nb; ++k) if (live_slots[k] == focus_slot) { fk = k; break; }
+                        int dgoal = pool[focus_slot].n_goals > 0
+                                  ? int(pool[focus_slot].goal_stack[0].kind)
+                                  : int(GoalKind::EXPLORE);
+                        if (dA == LENS_ACT)
+                            thought = lens.think(&hidden[size_t(fk) * dH], values[fk], dgoal);
+                    }
+                }
+
                 // M4: run PPO train step if any rollout is full
                 if (ppo_buf.any_ready()) {
                     std::array<float, N_POOL> bootstrap{};
@@ -989,13 +1076,21 @@ struct CorvidM1 : App {
             }
 #endif
         }
+
+        // --- Part B: evolve the crow splat cloud from the current thought ---
+        if (show_splats) splats.update(thought, sim_time, dt);
     }
 
     // ---------------------------------------------------------------------------
     // onDraw
     // ---------------------------------------------------------------------------
     void onDraw(Graphics& g) override {
-        g.clear(0.03f, 0.03f, 0.06f);
+        g.clear(0.0f, 0.0f, 0.0f);
+
+        // --- Part B: generative "thinking" skybox (draw first, behind all) ---
+        if (show_skybox && skybox.ready())
+            skybox.draw(g, nav().pos(), thought, sim_time);
+
         g.blending(true);
         g.blendTrans();
         g.depthTesting(true);
@@ -1003,6 +1098,16 @@ struct CorvidM1 : App {
         // --- entities ---
         for (auto& e : entities)
             e->draw(g);
+
+        // --- Part B: crow splat cloud, anchored on the focused corvid ---
+        if (show_splats && splats.ready()) {
+            Vec3f c(0, 0, 0);
+            if (focus_slot >= 0 && pool[focus_slot].live) {
+                auto& p = pool[focus_slot].nav.pos();
+                c = Vec3f(float(p.x), float(p.y), float(p.z));
+            }
+            splats.draw(g, c, 1.6f);
+        }
 
         // --- place grid novelty heat map (M2 visualizer) ---
         // Layer 1: translucent solid voxels scaled by novelty (heat map fill).
