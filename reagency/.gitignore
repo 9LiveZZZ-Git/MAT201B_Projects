@@ -2,6 +2,9 @@
 build/
 bin/
 
+# Runtime-generated distributed config (a stale one can force a non-primary launch -> black screen)
+distributed_app.toml
+
 # Offline factory intermediates (regenerate via factory/)
 factory/work/
 factory/*.zip

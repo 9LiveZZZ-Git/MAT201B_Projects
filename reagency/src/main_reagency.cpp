@@ -91,15 +91,23 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
         }
       }
 
-      // Camera: INSIDE the galaxy (it surrounds you), gentle drift + slow yaw to pan the 360.
-      // In the dome the omni renderer shows all directions from this point; desktop shows the
-      // forward slice.
+      // Camera. A DENSE corpus (the real ~10k) lets us sit INSIDE the cloud and be enveloped;
+      // a small preview corpus is too sparse for inside-out (you'd see mostly void), so we
+      // orbit just outside and look in. Auto-switches once the corpus is dense.
       const double t = s.simTime;
-      const Vec3d eye(1.8 * std::sin(t * 0.045), 0.9 * std::sin(t * 0.031), 1.8 * std::cos(t * 0.045));
-      nav().pos().set(eye.x, eye.y, eye.z);
-      const double yaw = t * 0.05;
-      const Vec3d look = eye + Vec3d(std::sin(yaw), 0.12 * std::sin(t * 0.02), std::cos(yaw)) * 6.0;
-      nav().faceToward(look, Vec3d(0, 1, 0));
+      if (field.count() >= 3000) {
+        // immersive: inside the cloud, gentle drift + slow yaw (omni fills the 360 in the dome)
+        const Vec3d eye(1.8 * std::sin(t * 0.045), 0.9 * std::sin(t * 0.031), 1.8 * std::cos(t * 0.045));
+        nav().pos().set(eye.x, eye.y, eye.z);
+        const double yaw = t * 0.05;
+        const Vec3d look = eye + Vec3d(std::sin(yaw), 0.12 * std::sin(t * 0.02), std::cos(yaw)) * 6.0;
+        nav().faceToward(look, Vec3d(0, 1, 0));
+      } else {
+        // sparse preview: close orbit, looking in, so the whole cloud reads
+        const double a = t * 0.05, R = 9.0;
+        nav().pos().set(R * std::sin(a), 1.5 * std::sin(a * 0.5), R * std::cos(a));
+        nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
+      }
 
       // pack pose for renderers
       const auto p = nav().pos();
