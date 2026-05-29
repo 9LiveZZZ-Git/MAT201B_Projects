@@ -406,7 +406,7 @@ void AudioEngine::render(al::AudioIOData& io) {
       for (int k = 0; k < 3; ++k) { float y = growlFmtCoef_[k][0] * g - growlFmtCoef_[k][1] * growlFz_[k][0] - growlFmtCoef_[k][2] * growlFz_[k][1];
         growlFz_[k][1] = dn(growlFz_[k][0]); growlFz_[k][0] = dn(y); fo += fw[k] * y; }
       g = 0.55f * g + 1.6f * fo;
-      subOut = subOut * (1.f - gact) + g * gact * 1.5f;
+      subOut = subOut * (1.f - gact) + g * gact * 0.85f;   // dubstep growl level down
     }
     lowMono += subOut * subAmp_ * droneGate_;
 
@@ -422,7 +422,7 @@ void AudioEngine::render(al::AudioIOData& io) {
       float sg = 0.6f * std::sin(kTAU * padPhase_[p]) + 0.25f * std::sin(kTAU * padPhase_[p] * 2.f);
       padLp_[p] = dn(padLp_[p] + (0.12f + 0.40f * depth) * (sg - padLp_[p]));
       float trem = 0.72f + 0.28f * std::sin(kTAU * padTrem_[p]);                    // slow amplitude swell
-      float tgtAmp = ((p < 2) ? 0.018f : 0.018f * padBloom_) * trem; padAmp_[p] += (tgtAmp - padAmp_[p]) * 0.002f;   // drone down ~-15 dB total
+      float tgtAmp = ((p < 2) ? 0.032f : 0.032f * padBloom_) * trem; padAmp_[p] += (tgtAmp - padAmp_[p]) * 0.002f;   // drone ~-10 dB
       float a = padAmp_[p] * padLp_[p] * droneGate_;       // drone pauses / drops out by section
       float pan = (p == 0) ? 0.f : (p == 1 ? -0.55f : (p == 2 ? 0.55f : 0.78f)); pan += 0.12f * drift; float pp = 0.5f * (pan + 1.f);
       bedL += a * std::cos(pp * 1.5707963f); bedR += a * std::sin(pp * 1.5707963f); revSend += a * 0.8f;
