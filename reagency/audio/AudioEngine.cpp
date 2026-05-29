@@ -130,7 +130,7 @@ void AudioEngine::init(const std::string& assetDir, double sampleRate) {
   reverb_.bandwidth(0.9f); reverb_.damping(0.45f); reverb_.decay(0.9f);
   cClusterRoot_.store(root_, std::memory_order_relaxed); subHz_ = root_ * 0.25f;
   for (int p = 0; p < PADN; ++p) padHz_[p] = root_ * kJI[p == 0 ? 0 : (p == 1 ? 2 : (p == 2 ? 5 : 7))];
-  ppN_ = int(sr_ * 0.55);                              // ping-pong delay buffers (allocated once)
+  ppN_ = int(sr_ * 0.55); if (ppN_ < 64) ppN_ = 64;    // ping-pong delay buffers (allocated once)
   ppL_.assign(ppN_, 0.f); ppR_.assign(ppN_, 0.f); ppPos_ = 0;
   ready_.store(true, std::memory_order_release);
 }
@@ -181,6 +181,7 @@ void AudioEngine::whisper(const std::string& word, int node, float pan) {
   float f0, f1, f2;
   if (word.empty() || syl == 0) { static const char vs[5] = {'a','e','i','o','u'}; formantFor(vs[(node>=0?node:0)%5], f0, f1, f2); syl = (node>=0?node:0)%3+1; } else formantFor(char(firstV), f0, f1, f2);
   syl = syl < 1 ? 1 : (syl > 5 ? 5 : syl);
+  cFmt0_.store(f0, std::memory_order_relaxed); cFmt1_.store(f1, std::memory_order_relaxed); cFmt2_.store(f2, std::memory_order_relaxed);  // -> talking growl
   Ev e{}; e.kind = EV_WHISPER; e.layer = 4; e.amp = 0.48f; e.pan = pan; e.islot = syl; e.a = f0; e.b = f1; e.c = f2; push(e);
 }
 void AudioEngine::update(float dt, float hesitation, float depth, float progress, float focusPan) {
@@ -347,9 +348,18 @@ void AudioEngine::render(al::AudioIOData& io) {
   // and add a slow continuous sweep so the wub is never static.
   wobChange_ -= float(nf) * isr;
   if (wobChange_ <= 0.f) { static const float WM[8] = {0.5f, 1.f, 1.5f, 2.f, 3.f, 4.f, 6.f, 8.f};
-    wobMult_ = WM[int(frand() * 8.f) % 8]; wobChange_ = 0.5f + 1.6f * frand(); }
+    wobMult_ = WM[int(frand() * 8.f) % 8]; wobChange_ = 0.5f + 1.6f * frand();
+    growlDutyTgt_ = (frand() < 0.6f) ? 1.f : 0.f; }     // ~40% of intervals: wobble OFF -> clean drone
+  growlDuty_ += (growlDutyTgt_ - growlDuty_) * gco(0.25f, nf, sr_);
   const float wobHz = slot * wobMult_ * (1.f + 0.25f * std::sin(kTAU * panLFO_ * 1.7f));
   const float fifthB = 1.5f - 0.006f * tension_;
+  // talking growl: tune the growl's formant resonators to the LAST whispered word's vowel
+  float wf0 = cFmt0_.load(std::memory_order_relaxed), wf1 = cFmt1_.load(std::memory_order_relaxed), wf2 = cFmt2_.load(std::memory_order_relaxed);
+  if (wf0 != lastFmt_[0] || wf1 != lastFmt_[1]) {
+    lastFmt_[0] = wf0; lastFmt_[1] = wf1; lastFmt_[2] = wf2;
+    const float gf[3] = {wf0, wf1, wf2}, gbw[3] = {110.f, 120.f, 150.f};
+    for (int k = 0; k < 3; ++k) { float r = std::exp(-kPI * gbw[k] / float(sr_));
+      growlFmtCoef_[k][0] = (1.f - r); growlFmtCoef_[k][1] = -2.f * r * std::cos(kTAU * gf[k] / float(sr_)); growlFmtCoef_[k][2] = r * r; } }
   const float padRatio[PADN] = {1.f, kJI[2], 1.5f, 2.f};
 
   // industrial-clang scheduler (sparse, "in places"; a touch more likely when tense)
@@ -383,14 +393,20 @@ void AudioEngine::render(al::AudioIOData& io) {
     float subS = std::sin(kTAU * subPhase_) + 0.3f * std::sin(kTAU * subPhase_ * 2.f);
     subLp_ = dn(subLp_ + 0.12f * (subS - subLp_));
     float subOut = subLp_;
-    if (growl_ > 0.01f) {
+    float gact = growl_ * growlDuty_;                    // 0 when the wobble is "off" -> clean drone
+    if (gact > 0.01f) {
       float wob = 0.5f - 0.5f * std::cos(kTAU * wobPhase_);
-      float ff = 2.f * std::sin(kPI * std::min(90.f + 520.f * wob, float(sr_) * 0.45f) / float(sr_));
+      float ff = 2.f * std::sin(kPI * std::min(90.f + 520.f * wob, float(sr_) / 6.f) / float(sr_));
       growlLp_ = dn(growlLp_ + ff * growlBp_);
       float hp = subS - growlLp_ - 0.18f * growlBp_;
       growlBp_ = dn(growlBp_ + ff * hp);
       float g = std::tanh(2.4f * growlLp_) * (0.4f + 0.6f * wob);
-      subOut = subOut * (1.f - growl_) + g * growl_ * 1.5f;
+      // formant-shape off the LAST whispered word -> a "talking" growl (the machine voicing the word)
+      float fo = 0.f; const float fw[3] = {1.f, 0.8f, 0.5f};
+      for (int k = 0; k < 3; ++k) { float y = growlFmtCoef_[k][0] * g - growlFmtCoef_[k][1] * growlFz_[k][0] - growlFmtCoef_[k][2] * growlFz_[k][1];
+        growlFz_[k][1] = dn(growlFz_[k][0]); growlFz_[k][0] = dn(y); fo += fw[k] * y; }
+      g = 0.55f * g + 1.6f * fo;
+      subOut = subOut * (1.f - gact) + g * gact * 1.5f;
     }
     lowMono += subOut * subAmp_ * droneGate_;
 

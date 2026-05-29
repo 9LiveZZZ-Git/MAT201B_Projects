@@ -74,6 +74,7 @@ class AudioEngine {
   std::atomic<float> cMoodBright_{0.5f}, cMoodDens_{0.3f}, cMoodWet_{0.3f};
   // arrangement gates (sim sets per-section targets; audio glides) + dubstep growl amount
   std::atomic<float> cDroneGate_{1.f}, cWhisperGate_{1.f}, cGrainGate_{1.f}, cGrowl_{0.f};
+  std::atomic<float> cFmt0_{500.f}, cFmt1_{1500.f}, cFmt2_{2500.f};   // formants of the last whispered word
 
   // ---------- sim-side state ----------
   std::vector<std::pair<float, int>> mel_;
@@ -127,6 +128,8 @@ class AudioEngine {
   // arrangement gates (glided) + dubstep growl LFO/filter + ping-pong delay (grains+whispers)
   float droneGate_ = 1.f, whisperGate_ = 1.f, grainGate_ = 1.f, growl_ = 0.f;
   float wobPhase_ = 0.f, growlLp_ = 0.f, growlBp_ = 0.f, wobMult_ = 1.f, wobChange_ = 0.f;
+  float growlDuty_ = 1.f, growlDutyTgt_ = 1.f;         // sometimes off -> clean drone
+  float growlFmtCoef_[3][3] = {}, growlFz_[3][2] = {}, lastFmt_[3] = {0.f, 0.f, 0.f};  // talking-growl formants
   std::vector<float> ppL_, ppR_; int ppN_ = 0, ppPos_ = 0;
   float panLFO_ = 0.f;
   float lastDepth_ = 1.f, moodLP_ = 1.f, tension_ = 0.f, padBloom_ = 1.f, reverbWet_ = 0.3f;
