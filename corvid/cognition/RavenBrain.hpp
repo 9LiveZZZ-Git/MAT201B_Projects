@@ -42,6 +42,16 @@ struct RavenBrain {
     // Returns mean KL(old || new). batch.N must be >= 4.
     float train_step(const TrainBatch& batch);
 
+    // Part B: forward that also exposes the LoRA-augmented hidden activations
+    // (post-ReLU, d_hidden per sample), for the tuned-lens readout (Lens.hpp).
+    // out_hidden is N * d_hidden floats. Any of the out_* pointers may be null.
+    void forward_tap(const float*   obs_flat,
+                     const int64_t* adapter_idx,
+                     int            N,
+                     float*         out_biases,   // N * d_action  (may be null)
+                     float*         out_values,   // N             (may be null)
+                     float*         out_hidden);  // N * d_hidden  (may be null)
+
     // M5: copy parent adapter rows into child slot then add scale-aware Gaussian noise.
     // If parent_b_slot >= 0, applies block-level uniform crossover before mutation.
     // sigma_base = 0.01 per spec §3.10.11 (ES midpoint).

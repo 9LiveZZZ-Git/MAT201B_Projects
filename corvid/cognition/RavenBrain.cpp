@@ -1,232 +1,343 @@
 #include "RavenBrain.hpp"
-#include <torch/torch.h>
+// ---------------------------------------------------------------------------
+// Native, dependency-free RavenNet (allolib-only rewrite — no libtorch).
+//
+// Architecture matches RavenNetConfig (spec §2.4.2.b):
+//   trunk : fc1(d_obs -> d_hidden) + ReLU
+//   heads : action(d_hidden -> d_action), value(d_hidden -> 1)
+//   per-agent LoRA: A[N, d_obs, r], B[N, r, d_hidden]
+//                   A ~ N(0, 1/sqrt(d_obs)) frozen, B = 0 (LoRA delta starts at 0)
+//
+// PPO train_step updates the shared trunk + heads + the per-agent B adapters
+// (only A stays frozen — matching the original torch impl, which handed
+// net->parameters() to Adam). Adam optimizer, clipped surrogate, value + entropy.
+//
+// All math is plain float / std::vector. Deterministic given the fixed seed.
+// ---------------------------------------------------------------------------
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
+#include <random>
+#include <vector>
 
 namespace corvid {
 
-// ---------------------------------------------------------------------------
-// RavenNet — torch::nn::Module (spec §2.4.2.b)
-// Tiny tier: fc1(d_obs→d_hidden) + LoRA, relu, fc2(d_hidden→d_action),
-// value_head(d_hidden→1).  Adapters: A_all[N, d_obs, r], B_all[N, r, d_hidden]
-// initialized with A=N(0, σ), B=0 so lora delta starts at zero.
-// ---------------------------------------------------------------------------
-struct RavenNetImpl : torch::nn::Module {
-    RavenNetImpl(const RavenNetConfig& cfg) : cfg_(cfg) {
-        fc1_        = register_module("fc1",   torch::nn::Linear(cfg.d_obs,    cfg.d_hidden));
-        fc2_        = register_module("fc2",   torch::nn::Linear(cfg.d_hidden, cfg.d_action));
-        value_head_ = register_module("vhead", torch::nn::Linear(cfg.d_hidden, 1));
+static constexpr uint32_t SEED_RAVENNET = 0x52415645u;  // 'RAVE'
 
-        // Adapter tables: A [N, d_obs, r], B [N, r, d_hidden]
-        // B zero-init → LoRA output starts at zero (standard LoRA init).
-        float a_std = 1.f / std::sqrt(float(cfg.d_obs));
-        A_all_ = register_parameter("A_all",
-            torch::randn({cfg.n_agents, cfg.d_obs, cfg.lora_rank}) * a_std,
-            /*requires_grad=*/false);  // fixed for M3; unfrozen at M4
-        B_all_ = register_parameter("B_all",
-            torch::zeros({cfg.n_agents, cfg.lora_rank, cfg.d_hidden}),
-            /*requires_grad=*/false);
-    }
+static constexpr float PPO_CLIP_EPS   = 0.2f;
+static constexpr float VALUE_COEF     = 0.5f;
+static constexpr float ENTROPY_COEF   = 0.01f;
+static constexpr float GRAD_CLIP_NORM = 0.5f;
+static constexpr float ADAM_LR        = 3e-4f;
+static constexpr float ADAM_B1        = 0.9f;
+static constexpr float ADAM_B2        = 0.999f;
+static constexpr float ADAM_EPS       = 1e-5f;
 
-    struct Out { torch::Tensor action_logits, value; };
-
-    // obs: [N, d_obs]  adapter_idx: [N] int64
-    Out forward(const torch::Tensor& obs, const torch::Tensor& adapter_idx) {
-        // Gather per-agent adapters (spec §2.4.2.a)
-        auto A = torch::index_select(A_all_, 0, adapter_idx);  // [N, d_obs, r]
-        auto B = torch::index_select(B_all_, 0, adapter_idx);  // [N, r, d_hidden]
-
-        // Base fc1 output + LoRA delta
-        auto base = fc1_->forward(obs);  // [N, d_hidden]
-
-        // Batched LoRA: lora = bmm(bmm(x.unsqueeze(1), A), B).squeeze(1)
-        // x.unsqueeze(1): [N, 1, d_obs]
-        // @A:              [N, 1, r]
-        // @B:              [N, 1, d_hidden]
-        auto lora = torch::bmm(
-                        torch::bmm(obs.unsqueeze(1), A),
-                        B).squeeze(1);   // [N, d_hidden]
-
-        auto h = torch::relu(base + lora);               // [N, d_hidden]
-        return {fc2_->forward(h), value_head_->forward(h)};
-    }
-
-    RavenNetConfig        cfg_;
-    torch::nn::Linear     fc1_{nullptr}, fc2_{nullptr}, value_head_{nullptr};
-    torch::Tensor         A_all_, B_all_;
-};
-TORCH_MODULE(RavenNet);
-
-// ---------------------------------------------------------------------------
-// RavenBrain::Impl
 // ---------------------------------------------------------------------------
 struct RavenBrain::Impl {
-    RavenNet   net{nullptr};
-    torch::Device device{torch::kCPU};
-    std::unique_ptr<torch::optim::Adam> opt;  // M4: adapter optimizer
+    RavenNetConfig c;
+
+    // Trainable params.
+    std::vector<float> W1, b1, Wa, ba, Wv;   float bv = 0.f;
+    std::vector<float> A;                      // frozen LoRA A
+    std::vector<float> B;                      // trainable LoRA B
+
+    // Adam moments (parallel to each trainable param).
+    std::vector<float> mW1, vW1, mb1, vb1, mWa, vWa, mba, vba, mWv, vWv, mB, vB;
+    float mbv = 0.f, vbv = 0.f;
+    long  adam_t = 0;
+
+    std::mt19937 rng{SEED_RAVENNET};
+
+    inline int W1i(int hid, int j)  const { return hid * c.d_obs + j; }
+    inline int Wai(int m,   int hid) const { return m * c.d_hidden + hid; }
+    inline int Ai (int ag, int j, int k)   const { return (ag * c.d_obs + j) * c.lora_rank + k; }
+    inline int Bi (int ag, int k, int hid) const { return (ag * c.lora_rank + k) * c.d_hidden + hid; }
+    inline int Bblock(int ag) const { return ag * c.lora_rank * c.d_hidden; }
+
+    void init(const RavenNetConfig& cfg) {
+        c = cfg;
+        const int dO = c.d_obs, dH = c.d_hidden, dA = c.d_action, r = c.lora_rank, N = c.n_agents;
+
+        std::normal_distribution<float> n1(0.f, 1.f / std::sqrt(float(dO)));
+        std::normal_distribution<float> nH(0.f, 1.f / std::sqrt(float(dH)));
+
+        W1.resize(dH * dO); for (auto& w : W1) w = n1(rng);
+        b1.assign(dH, 0.f);
+        Wa.resize(dA * dH); for (auto& w : Wa) w = nH(rng);
+        ba.assign(dA, 0.f);
+        Wv.resize(dH);      for (auto& w : Wv) w = nH(rng);
+        bv = 0.f;
+
+        std::normal_distribution<float> nA(0.f, 1.f / std::sqrt(float(dO)));
+        A.resize(size_t(N) * dO * r); for (auto& w : A) w = nA(rng);
+        B.assign(size_t(N) * r * dH, 0.f);
+
+        mW1.assign(W1.size(), 0.f); vW1.assign(W1.size(), 0.f);
+        mb1.assign(b1.size(), 0.f); vb1.assign(b1.size(), 0.f);
+        mWa.assign(Wa.size(), 0.f); vWa.assign(Wa.size(), 0.f);
+        mba.assign(ba.size(), 0.f); vba.assign(ba.size(), 0.f);
+        mWv.assign(Wv.size(), 0.f); vWv.assign(Wv.size(), 0.f);
+        mB.assign(B.size(), 0.f);   vB.assign(B.size(), 0.f);
+        mbv = vbv = 0.f;
+        adam_t = 0;
+    }
+
+    void forwardOne(const float* x, int ag,
+                    float* out_logits, float* out_value,
+                    std::vector<float>* pre = nullptr,
+                    std::vector<float>* hvec = nullptr,
+                    std::vector<float>* uvec = nullptr) const {
+        const int dO = c.d_obs, dH = c.d_hidden, dA = c.d_action, r = c.lora_rank;
+
+        float u[8] = {0};
+        for (int k = 0; k < r; ++k) {
+            float acc = 0.f;
+            for (int j = 0; j < dO; ++j) acc += x[j] * A[Ai(ag, j, k)];
+            u[k] = acc;
+        }
+
+        std::vector<float> h(dH);
+        if (pre) pre->assign(dH, 0.f);
+        for (int hid = 0; hid < dH; ++hid) {
+            float acc = b1[hid];
+            for (int j = 0; j < dO; ++j) acc += W1[W1i(hid, j)] * x[j];
+            for (int k = 0; k < r; ++k)  acc += u[k] * B[Bi(ag, k, hid)];
+            if (pre) (*pre)[hid] = acc;
+            h[hid] = acc > 0.f ? acc : 0.f;
+        }
+
+        for (int m = 0; m < dA; ++m) {
+            float acc = ba[m];
+            for (int hid = 0; hid < dH; ++hid) acc += Wa[Wai(m, hid)] * h[hid];
+            out_logits[m] = acc;
+        }
+        float v = bv;
+        for (int hid = 0; hid < dH; ++hid) v += Wv[hid] * h[hid];
+        *out_value = v;
+
+        if (hvec) *hvec = std::move(h);
+        if (uvec) { uvec->assign(r, 0.f); for (int k = 0; k < r; ++k) (*uvec)[k] = u[k]; }
+    }
+
+    // Adam update of one param vector given its grad (already globally scaled).
+    void adam(std::vector<float>& p, std::vector<float>& m, std::vector<float>& v,
+              const std::vector<float>& g, float bc1, float bc2) {
+        for (size_t i = 0; i < p.size(); ++i) {
+            m[i] = ADAM_B1 * m[i] + (1.f - ADAM_B1) * g[i];
+            v[i] = ADAM_B2 * v[i] + (1.f - ADAM_B2) * g[i] * g[i];
+            p[i] -= ADAM_LR * (m[i] / bc1) / (std::sqrt(v[i] / bc2) + ADAM_EPS);
+        }
+    }
 };
 
+// ---------------------------------------------------------------------------
 RavenBrain::~RavenBrain() { delete impl_; }
 
 bool RavenBrain::init(const RavenNetConfig& c) {
-    cfg   = c;
+    cfg = c;
     delete impl_;
     impl_ = new Impl();
-    impl_->net = RavenNet(c);
-    // M4: unfreeze B_all_ for adapter training; A_all_ stays frozen
-    impl_->net->B_all_.requires_grad_(true);
-    impl_->net->eval();
-    impl_->net->to(impl_->device);
-
-    // Adam optimizer — fc1/fc2/value_head default requires_grad=true; B_all_ just unfrozen
-    impl_->opt = std::make_unique<torch::optim::Adam>(
-        impl_->net->parameters(),
-        torch::optim::AdamOptions(3e-4).eps(1e-5));
-
-    // Log to file (Windows GUI apps have no console)
+    impl_->init(c);
     if (FILE* f = std::fopen("ravennet_init.log", "w")) {
-        std::fprintf(f, "[RavenBrain] init  d_obs=%d  d_hidden=%d  d_action=%d"
-                        "  lora_rank=%d  n_agents=%d  device=cpu\n",
+        std::fprintf(f, "[RavenBrain] native init  d_obs=%d d_hidden=%d d_action=%d"
+                        " lora_rank=%d n_agents=%d  (no torch)\n",
                         c.d_obs, c.d_hidden, c.d_action, c.lora_rank, c.n_agents);
         std::fclose(f);
     }
     return true;
 }
 
-void RavenBrain::forward(const float*   obs_flat,
-                         const int64_t* adapter_idx,
-                         int            N,
-                         float*         out_biases,
-                         float*         out_values)
-{
+void RavenBrain::forward(const float* obs_flat, const int64_t* adapter_idx,
+                         int N, float* out_biases, float* out_values) {
     if (!impl_ || N <= 0) return;
-
     auto t0 = std::chrono::high_resolution_clock::now();
-
-    // Use InferenceMode per spec §3.2.2 (faster than NoGradGuard)
-    torch::InferenceMode guard;
-
-    auto obs_t = torch::from_blob(
-        const_cast<float*>(obs_flat),
-        {N, cfg.d_obs},
-        torch::kFloat32).clone();   // clone: obs_flat may be stack memory
-
-    auto idx_t = torch::from_blob(
-        const_cast<int64_t*>(adapter_idx),
-        {N},
-        torch::kInt64).clone();
-
-    auto out = impl_->net->forward(obs_t, idx_t);
-
-    // Copy results back to caller's flat arrays
-    auto logits_cpu = out.action_logits.contiguous().cpu();
-    auto value_cpu  = out.value.contiguous().cpu();
-    std::memcpy(out_biases, logits_cpu.data_ptr<float>(),
-                N * cfg.d_action * sizeof(float));
-    std::memcpy(out_values, value_cpu.data_ptr<float>(),
-                N * sizeof(float));
-
+    const int dO = cfg.d_obs, dA = cfg.d_action;
+    for (int n = 0; n < N; ++n) {
+        int ag = int(adapter_idx[n]);
+        if (ag < 0 || ag >= cfg.n_agents) ag = 0;
+        impl_->forwardOne(obs_flat + size_t(n) * dO, ag,
+                          out_biases + size_t(n) * dA, out_values + n);
+    }
     auto t1 = std::chrono::high_resolution_clock::now();
-    last_ms  = std::chrono::duration<float, std::milli>(t1 - t0).count();
+    last_ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
+}
 
-    if (last_ms > 3.f) {
-        if (FILE* f = std::fopen("ravennet_timing.log", "a")) {
-            std::fprintf(f, "WARNING forward %.2f ms > 3 ms budget (N=%d)\n", last_ms, N);
-            std::fclose(f);
-        }
+void RavenBrain::forward_tap(const float* obs_flat, const int64_t* adapter_idx,
+                             int N, float* out_biases, float* out_values,
+                             float* out_hidden) {
+    if (!impl_ || N <= 0) return;
+    const int dO = cfg.d_obs, dA = cfg.d_action, dH = cfg.d_hidden;
+    std::vector<float> logits(dA), hvec;
+    float val = 0.f;
+    for (int n = 0; n < N; ++n) {
+        int ag = int(adapter_idx[n]);
+        if (ag < 0 || ag >= cfg.n_agents) ag = 0;
+        impl_->forwardOne(obs_flat + size_t(n) * dO, ag,
+                          logits.data(), &val, nullptr, &hvec, nullptr);
+        if (out_biases) std::copy(logits.begin(), logits.end(),
+                                  out_biases + size_t(n) * dA);
+        if (out_values) out_values[n] = val;
+        if (out_hidden) std::copy(hvec.begin(), hvec.end(),
+                                  out_hidden + size_t(n) * dH);
     }
 }
 
-float RavenBrain::train_step(const TrainBatch& b)
-{
-    if (!impl_ || !impl_->opt || b.N < 4) return 0.f;
+// ---------------------------------------------------------------------------
+// PPO gradient step over trunk + heads + per-agent B (A frozen).
+// ---------------------------------------------------------------------------
+float RavenBrain::train_step(const TrainBatch& batch) {
+    if (!impl_ || batch.N < 4) return 0.f;
+    auto t0 = std::chrono::high_resolution_clock::now();
 
-    auto obs_t   = torch::from_blob(const_cast<float*>(b.obs.data()),
-                       {b.N, cfg.d_obs}, torch::kFloat32).clone();
-    auto idx_t   = torch::from_blob(const_cast<int64_t*>(b.adapter_idx.data()),
-                       {b.N}, torch::kInt64).clone();
-    auto act_t   = torch::from_blob(const_cast<int32_t*>(b.actions.data()),
-                       {b.N}, torch::kInt32).to(torch::kInt64);
-    auto adv_t   = torch::from_blob(const_cast<float*>(b.advantages.data()),
-                       {b.N}, torch::kFloat32).clone();
-    auto ret_t   = torch::from_blob(const_cast<float*>(b.returns.data()),
-                       {b.N}, torch::kFloat32).clone();
-    auto old_lp  = torch::from_blob(const_cast<float*>(b.old_logprobs.data()),
-                       {b.N}, torch::kFloat32).clone();
-    // M5: teaching window — scale effective advantage by teaching_scale (3× for juveniles)
-    if (!b.teaching_scale.empty()) {
-        auto ts = torch::from_blob(const_cast<float*>(b.teaching_scale.data()),
-                      {b.N}, torch::kFloat32).clone();
-        adv_t = adv_t * ts;
+    Impl& I = *impl_;
+    const int dO = cfg.d_obs, dH = cfg.d_hidden, dA = cfg.d_action, r = cfg.lora_rank;
+    const int N  = batch.N;
+    const float invN = 1.f / float(N);
+
+    std::vector<float> gW1(I.W1.size(), 0.f), gb1(I.b1.size(), 0.f);
+    std::vector<float> gWa(I.Wa.size(), 0.f), gba(I.ba.size(), 0.f);
+    std::vector<float> gWv(I.Wv.size(), 0.f); float gbv = 0.f;
+    std::vector<float> gB(I.B.size(), 0.f);
+
+    double sum_kl = 0.0, sum_ploss = 0.0, sum_vloss = 0.0;
+    std::vector<float> pre, h, u, logits(dA), prob(dA), dlogit(dA);
+
+    for (int n = 0; n < N; ++n) {
+        int ag = int(batch.adapter_idx[n]);
+        if (ag < 0 || ag >= cfg.n_agents) ag = 0;
+        const float* x = batch.obs.data() + size_t(n) * dO;
+
+        float value = 0.f;
+        I.forwardOne(x, ag, logits.data(), &value, &pre, &h, &u);
+
+        float mx = logits[0];
+        for (int m = 1; m < dA; ++m) mx = std::max(mx, logits[m]);
+        float sum = 0.f;
+        for (int m = 0; m < dA; ++m) { prob[m] = std::exp(logits[m] - mx); sum += prob[m]; }
+        float inv = 1.f / (sum + 1e-20f);
+        for (int m = 0; m < dA; ++m) prob[m] *= inv;
+
+        int a = batch.actions[n]; if (a < 0 || a >= dA) a = 0;
+        float new_lp = std::log(prob[a] + 1e-20f);
+        float old_lp = batch.old_logprobs[n];
+
+        float adv = batch.advantages[n];
+        if (!batch.teaching_scale.empty()) adv *= batch.teaching_scale[n];
+        float ret = batch.returns[n];
+
+        float ratio = std::exp(new_lp - old_lp);
+        float surr1 = ratio * adv;
+        float clipped = std::min(std::max(ratio, 1.f - PPO_CLIP_EPS), 1.f + PPO_CLIP_EPS);
+        float surr2 = clipped * adv;
+        bool  use1  = surr1 <= surr2;
+        float coef_p = use1 ? (adv * ratio) : 0.f;       // d(min surr)/d(new_lp)
+
+        float H = 0.f;
+        for (int m = 0; m < dA; ++m) H -= prob[m] * std::log(prob[m] + 1e-20f);
+
+        float dv = 2.f * VALUE_COEF * (value - ret) * invN;   // d(VALUE_COEF*MSE)/dvalue
+
+        for (int m = 0; m < dA; ++m) {
+            float dpi = ((m == a) ? 1.f : 0.f) - prob[m];      // d new_lp / d logit
+            float g_policy  = -(coef_p * invN) * dpi;
+            float g_entropy = ENTROPY_COEF * prob[m] * (std::log(prob[m] + 1e-20f) + H);
+            dlogit[m] = g_policy + g_entropy;
+        }
+
+        // head grads + backprop to h
+        std::vector<float> dh(dH, 0.f);
+        for (int m = 0; m < dA; ++m) {
+            gba[m] += dlogit[m];
+            for (int hid = 0; hid < dH; ++hid) {
+                gWa[I.Wai(m, hid)] += dlogit[m] * h[hid];
+                dh[hid] += dlogit[m] * I.Wa[I.Wai(m, hid)];
+            }
+        }
+        gbv += dv;
+        for (int hid = 0; hid < dH; ++hid) {
+            gWv[hid] += dv * h[hid];
+            dh[hid]  += dv * I.Wv[hid];
+        }
+
+        // through ReLU into pre, then trunk + LoRA B
+        int bbase = I.Bblock(ag);
+        for (int hid = 0; hid < dH; ++hid) {
+            float dpre = (pre[hid] > 0.f) ? dh[hid] : 0.f;
+            if (dpre == 0.f) continue;
+            gb1[hid] += dpre;
+            for (int j = 0; j < dO; ++j) gW1[I.W1i(hid, j)] += dpre * x[j];
+            for (int k = 0; k < r; ++k)  gB[bbase + k * dH + hid] += dpre * u[k];
+        }
+
+        sum_kl    += double(old_lp - new_lp);
+        sum_ploss += double(-std::min(surr1, surr2));
+        sum_vloss += double((value - ret) * (value - ret));
     }
 
-    impl_->net->train();
-    impl_->opt->zero_grad();
-
-    // Forward with grad (no InferenceMode)
-    auto out = impl_->net->forward(obs_t, idx_t);
-
-    // Policy: categorical log-probs [N, d_action]
-    auto log_probs = torch::log_softmax(out.action_logits, 1);
-    auto new_lp    = log_probs.gather(1, act_t.unsqueeze(1)).squeeze(1);
-
-    // PPO clipped surrogate loss (spec §3.2.1, ε=0.2)
-    auto ratio = (new_lp - old_lp).exp();
-    auto surr1 = ratio * adv_t;
-    auto surr2 = torch::clamp(ratio, 1.f - 0.2f, 1.f + 0.2f) * adv_t;
-    auto policy_loss = -torch::min(surr1, surr2).mean();
-
-    // Value loss (MSE vs GAE returns)
-    auto value_loss = torch::mse_loss(out.value.squeeze(1), ret_t);
-
-    // Entropy bonus — encourages exploration
-    auto entropy = -(log_probs * log_probs.exp()).sum(-1).mean();
-
-    auto loss = policy_loss + 0.5f * value_loss - 0.01f * entropy;
-
-    // Approximate KL (old || new) for monitoring
-    auto kl = (old_lp - new_lp).mean();
-
-    loss.backward();
-    torch::nn::utils::clip_grad_norm_(
-        std::vector<torch::Tensor>{impl_->net->B_all_}, 0.5f);
-    impl_->opt->step();
-    impl_->net->eval();
-
-    last_kl          = kl.item<float>();
-    last_policy_loss = policy_loss.item<float>();
-    last_value_loss  = value_loss.item<float>();
-
-    if (FILE* f = std::fopen("ravennet_timing.log", "a")) {
-        if (std::fabs(last_kl) > 0.02f)
-            std::fprintf(f, "KL WARNING %.4f (budget 0.02)\n", last_kl);
-        std::fclose(f);
+    // Global grad-norm clip across all trained params.
+    double nrm2 = 0.0;
+    auto acc = [&](const std::vector<float>& g) { for (float v : g) nrm2 += double(v) * v; };
+    acc(gW1); acc(gb1); acc(gWa); acc(gba); acc(gWv); acc(gB);
+    nrm2 += double(gbv) * gbv;
+    float nrm = float(std::sqrt(nrm2));
+    if (nrm > GRAD_CLIP_NORM && nrm > 0.f) {
+        float s = GRAD_CLIP_NORM / nrm;
+        auto sc = [&](std::vector<float>& g) { for (float& v : g) v *= s; };
+        sc(gW1); sc(gb1); sc(gWa); sc(gba); sc(gWv); sc(gB); gbv *= s;
     }
+
+    I.adam_t += 1;
+    float bc1 = 1.f - std::pow(ADAM_B1, float(I.adam_t));
+    float bc2 = 1.f - std::pow(ADAM_B2, float(I.adam_t));
+    I.adam(I.W1, I.mW1, I.vW1, gW1, bc1, bc2);
+    I.adam(I.b1, I.mb1, I.vb1, gb1, bc1, bc2);
+    I.adam(I.Wa, I.mWa, I.vWa, gWa, bc1, bc2);
+    I.adam(I.ba, I.mba, I.vba, gba, bc1, bc2);
+    I.adam(I.Wv, I.mWv, I.vWv, gWv, bc1, bc2);
+    I.adam(I.B,  I.mB,  I.vB,  gB,  bc1, bc2);
+    {   // bv scalar
+        I.mbv = ADAM_B1 * I.mbv + (1.f - ADAM_B1) * gbv;
+        I.vbv = ADAM_B2 * I.vbv + (1.f - ADAM_B2) * gbv * gbv;
+        I.bv -= ADAM_LR * (I.mbv / bc1) / (std::sqrt(I.vbv / bc2) + ADAM_EPS);
+    }
+
+    last_kl          = float(sum_kl    * invN);
+    last_policy_loss = float(sum_ploss * invN);
+    last_value_loss  = float(sum_vloss * invN);
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+    last_ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
     return last_kl;
 }
 
-void RavenBrain::inherit_adapter(int child, int pa, int pb, float sigma_base)
-{
+// ---------------------------------------------------------------------------
+void RavenBrain::inherit_adapter(int child, int pa, int pb, float sigma_base) {
     if (!impl_) return;
-    torch::NoGradGuard guard;
+    Impl& I = *impl_;
+    const int dH = cfg.d_hidden, r = cfg.lora_rank;
+    if (child < 0 || child >= cfg.n_agents || pa < 0 || pa >= cfg.n_agents) return;
 
-    // Copy parent_a row into child
-    impl_->net->B_all_[child] = impl_->net->B_all_[pa].clone();
+    int cbase = I.Bblock(child), abase = I.Bblock(pa);
+    for (int e = 0; e < r * dH; ++e) I.B[cbase + e] = I.B[abase + e];
 
-    // Optional block-level crossover: each rank-slice independently from pa or pb
-    if (pb >= 0 && pb != pa) {
-        int rank = impl_->net->cfg_.lora_rank;
-        for (int r = 0; r < rank; ++r) {
-            if (torch::rand({1}).item<float>() < 0.5f)
-                impl_->net->B_all_[child][r] = impl_->net->B_all_[pb][r].clone();
-        }
+    if (pb >= 0 && pb != pa && pb < cfg.n_agents) {
+        int bbase = I.Bblock(pb);
+        std::uniform_real_distribution<float> uni(0.f, 1.f);
+        for (int k = 0; k < r; ++k)
+            if (uni(I.rng) < 0.5f)
+                for (int hid = 0; hid < dH; ++hid)
+                    I.B[cbase + k * dH + hid] = I.B[bbase + k * dH + hid];
     }
 
-    // Scale-aware Gaussian mutation: noise = sigma_base * |B| * N(0,1)
-    auto noise = sigma_base
-                 * impl_->net->B_all_[child].abs()
-                 * torch::randn_like(impl_->net->B_all_[child]);
-    impl_->net->B_all_[child] += noise;
+    std::normal_distribution<float> gauss(0.f, 1.f);
+    for (int e = 0; e < r * dH; ++e) {
+        float b = I.B[cbase + e];
+        I.B[cbase + e] = b + sigma_base * std::fabs(b) * gauss(I.rng);
+        I.mB[cbase + e] = 0.f;
+        I.vB[cbase + e] = 0.f;
+    }
 }
 
 } // namespace corvid

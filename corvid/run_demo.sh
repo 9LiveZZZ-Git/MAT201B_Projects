@@ -1,12 +1,13 @@
 #!/bin/bash
-# Build and run corvid_p3 (alpha screen demo).
-# Run from anywhere: bash MAT201B_projects/corvid/run_demo.sh
+# Build and run corvid_m1 (allolib-native alpha demo).
+# Run from anywhere: bash MAT201B_Projects/corvid/run_demo.sh [target]
+#   target defaults to corvid_m1 (try corvid_p3 for the distributed demo).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
+TARGET="${1:-corvid_m1}"
 
-# Number of parallel jobs
-JOBS=$(nproc 2>/dev/null || echo 4)
+JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # --------------------------------------------------------------------------
 # Pick cmake — VS-bundled cmake handles MSVC correctly on Windows
@@ -23,7 +24,7 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# Configure if cache is missing
+# Configure if cache is missing. allolib needs the policy-min shim.
 # --------------------------------------------------------------------------
 if [ ! -f "${BUILD_DIR}/CMakeCache.txt" ]; then
   echo "[corvid] configuring with generator: ${GENERATOR}"
@@ -33,32 +34,20 @@ if [ ! -f "${BUILD_DIR}/CMakeCache.txt" ]; then
     -G "${GENERATOR}" \
     ${PLATFORM_FLAG} \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCORVID_USE_LLM=ON \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     || exit 1
 fi
 
 # --------------------------------------------------------------------------
-# Build corvid_p3
+# Build + run
 # --------------------------------------------------------------------------
-echo "[corvid] building corvid_p3..."
-"${CMAKE_BIN}" --build "${BUILD_DIR}" --target corvid_p3 --config Release -j "${JOBS}" || exit 1
+echo "[corvid] building ${TARGET}..."
+"${CMAKE_BIN}" --build "${BUILD_DIR}" --target "${TARGET}" --config Release -j "${JOBS}" || exit 1
 
-# --------------------------------------------------------------------------
-# Run
-# --------------------------------------------------------------------------
-MODEL="C:/Users/lpfre/allolib_playground/MAT201B_projects/assets/models/gemma-4-E2B-it-Q4_K_M.gguf"
+BIN="${BUILD_DIR}/Release/${TARGET}.exe"
+[ -f "${BIN}" ] || BIN="${BUILD_DIR}/${TARGET}.exe"
+[ -f "${BIN}" ] || BIN="${BUILD_DIR}/bin/${TARGET}"
+[ -f "${BIN}" ] || BIN="${BUILD_DIR}/${TARGET}"
 
-echo "[corvid] launching screen demo..."
-# VS puts the binary in a config subdirectory
-BIN="${BUILD_DIR}/Release/corvid_p3.exe"
-[ -f "${BIN}" ] || BIN="${BUILD_DIR}/corvid_p3.exe"
-[ -f "${BIN}" ] || BIN="${BUILD_DIR}/corvid_p3"
-
-if [ -f "${MODEL}" ]; then
-  echo "[corvid] model found, LLM overlay enabled"
-  "${BIN}" --model "${MODEL}"
-else
-  echo "[corvid] WARNING: model not found at ${MODEL}, running without LLM"
-  "${BIN}"
-fi
+echo "[corvid] launching ${TARGET}..."
+"${BIN}"

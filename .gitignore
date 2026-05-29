@@ -46,3 +46,15 @@ corvid/vendor/libtorch/
 corvid/vendor/libtorch-win-cu126.zip
 corvid/vendor/libtorch-win-cpu.zip
 corvid/debug_out.txt
+
+# Local working docs (notes/plans, not project source)
+corvid/docs/
+
+# Corvid runtime log artifacts
+corvid/*.log
+
+# Crow source images for the splat cloud (large, local-only; loaded at runtime).
+# Keep on disk; never track. See docs/REWRITE_PLAN.md.
+corvid/Crow Photos 4 Splat/
+corvid/assets/crows/
+*.crdownload

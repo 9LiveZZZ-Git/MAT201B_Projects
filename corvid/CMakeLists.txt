@@ -4,93 +4,28 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --------------------------------------------------------------------------
-# Allolib — reuse playground's submodule
+# Allolib-native corvid.
+#
+# This project is intentionally allolib + plain-C++ only. The former libtorch
+# (RavenNet) and llama.cpp (LLM reflection) dependencies have been removed:
+#   - RavenNet  -> hand-rolled MLP + LoRA + PPO in cognition/RavenBrain.cpp
+#   - reflection-> procedural reflector in cognition/Reflection.cpp, run on a
+#                  background thread by cognition/LlmReflection.cpp
+# No torch / llama / ggml / Python anywhere. See docs/REWRITE_PLAN.md.
 # --------------------------------------------------------------------------
+
+# Allolib — reuse playground's submodule
 set(ALLOLIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../allolib")
 add_subdirectory(${ALLOLIB_DIR} allolib_build)
 
-# Common include paths for all targets
+find_package(Threads REQUIRED)
+
 set(CORVID_INCLUDE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${ALLOLIB_DIR}/include"
     "${ALLOLIB_DIR}/external/Gamma"
 )
 
-# --------------------------------------------------------------------------
-# LLM option — llama.cpp
-# Uses vendor/llama.cpp if present (git clone --depth 1 --branch b5575),
-# otherwise falls back to FetchContent for CI.
-# --------------------------------------------------------------------------
-option(CORVID_USE_LLM "Enable llama.cpp LLM smoke test" ON)
-
-if(CORVID_USE_LLM)
-  set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
-  set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(GGML_CUDA            OFF CACHE BOOL "" FORCE)  # CPU-only; see pins.toml
-  set(GGML_NATIVE          ON  CACHE BOOL "" FORCE)
-
-  set(CORVID_LLAMA_VENDOR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/llama.cpp")
-  if(EXISTS "${CORVID_LLAMA_VENDOR}/CMakeLists.txt")
-    add_subdirectory(${CORVID_LLAMA_VENDOR} llama_cpp_build)
-    set(llama_cpp_SOURCE_DIR "${CORVID_LLAMA_VENDOR}")
-  else()
-    include(FetchContent)
-    FetchContent_Declare(
-      llama_cpp
-      GIT_REPOSITORY https://github.com/ggerganov/llama.cpp
-      GIT_TAG        b5575
-      GIT_SHALLOW    ON
-    )
-    FetchContent_MakeAvailable(llama_cpp)
-  endif()
-endif()
-
-# --------------------------------------------------------------------------
-# Torch — prefer vendor/libtorch standalone zip (no Python DLL init issues),
-# fall back to pip-installed PyTorch for cmake path detection.
-#
-# To use standalone libtorch:
-#   1. Unzip libtorch-win-shared-with-deps-2.9.0+cu126.zip to vendor/libtorch/
-#   2. Re-run cmake (CORVID_TORCH_PREFIX auto-detected)
-# --------------------------------------------------------------------------
-option(CORVID_USE_TORCH "Enable libtorch smoke test" ON)
-
-if(CORVID_USE_TORCH)
-  if(NOT CORVID_TORCH_PREFIX)
-    # 1. Prefer standalone libtorch zip (vendor/libtorch)
-    set(_vendor_libtorch "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libtorch/share/cmake/Torch")
-    if(EXISTS "${_vendor_libtorch}")
-      set(CORVID_TORCH_PREFIX "${_vendor_libtorch}")
-      message(STATUS "Torch: using standalone vendor/libtorch")
-    else()
-      # 2. Fall back to pip-installed (Windows-only caveat: crashes pre-main in standalone exes)
-      execute_process(
-        COMMAND python -c
-          "import torch, os; print(os.path.join(os.path.dirname(torch.__file__), 'share', 'cmake', 'Torch'))"
-        OUTPUT_VARIABLE _torch_cmake_dir
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-      )
-      if(_torch_cmake_dir AND EXISTS "${_torch_cmake_dir}")
-        set(CORVID_TORCH_PREFIX "${_torch_cmake_dir}")
-        message(STATUS "Torch: using pip-installed (runtime may crash on Windows standalone exe)")
-      endif()
-    endif()
-  endif()
-
-  if(CORVID_TORCH_PREFIX)
-    set(CAFFE2_USE_CUDA OFF CACHE BOOL "" FORCE)
-    find_package(Torch REQUIRED PATHS "${CORVID_TORCH_PREFIX}" NO_DEFAULT_PATH)
-    message(STATUS "Torch found: ${Torch_VERSION} at ${CORVID_TORCH_PREFIX}")
-    set(CMAKE_CXX_STANDARD 17)
-  else()
-    message(WARNING "CORVID_USE_TORCH=ON but libtorch not found — unzip vendor/libtorch or install torch via pip")
-    set(CORVID_USE_TORCH OFF)
-  endif()
-endif()
-
-# --------------------------------------------------------------------------
-# Helper: apply shared compiler flags
 # --------------------------------------------------------------------------
 function(corvid_target_flags tgt)
   if(MSVC)
@@ -116,106 +51,25 @@ target_link_libraries(corvid_p2 PRIVATE al)
 corvid_target_flags(corvid_p2)
 
 # --------------------------------------------------------------------------
-# corvid_p3 — DistributedAppWithState + PolySynth + alpha demo
+# corvid_p3 — DistributedAppWithState + PolySynth + alpha demo (no LLM overlay)
 # --------------------------------------------------------------------------
-if(CORVID_USE_LLM)
-  add_executable(corvid_p3 src/main_p3.cpp cognition/LlmSmoke.cpp)
-  target_link_libraries(corvid_p3 PRIVATE al llama)
-  target_compile_definitions(corvid_p3 PRIVATE CORVID_LLM)
-  target_include_directories(corvid_p3 PRIVATE
-    ${CORVID_INCLUDE_DIRS}
-    ${llama_cpp_SOURCE_DIR}
-    ${llama_cpp_SOURCE_DIR}/include
-    ${llama_cpp_SOURCE_DIR}/ggml/include
-  )
-  if(MSVC)
-    target_compile_options(corvid_p3 PRIVATE /W3 /WX-)
-  else()
-    target_compile_options(corvid_p3 PRIVATE -Wall -Wextra -fno-omit-frame-pointer)
-  endif()
-else()
-  add_executable(corvid_p3 src/main_p3.cpp)
-  target_link_libraries(corvid_p3 PRIVATE al)
-  corvid_target_flags(corvid_p3)
-endif()
+add_executable(corvid_p3 src/main_p3.cpp)
+target_link_libraries(corvid_p3 PRIVATE al)
+corvid_target_flags(corvid_p3)
 
 # --------------------------------------------------------------------------
-# corvid_llm_smoke — llama.cpp C API wrapper
+# corvid_m1 — M1/M2/M3 alpha demo (native RavenNet + procedural reflection)
 # --------------------------------------------------------------------------
-# --------------------------------------------------------------------------
-# corvid_torch_smoke — libtorch + RavenNet stub + LoRA forward pass
-# --------------------------------------------------------------------------
-if(CORVID_USE_TORCH)
-  add_executable(corvid_torch_smoke src/main_torch_smoke.cpp)
-  target_link_libraries(corvid_torch_smoke PRIVATE "${TORCH_LIBRARIES}")
-  target_include_directories(corvid_torch_smoke PRIVATE ${TORCH_INCLUDE_DIRS})
-  set_property(TARGET corvid_torch_smoke PROPERTY CXX_STANDARD 17)
-  if(MSVC)
-    # Torch requires /bigobj and disables some warnings
-    target_compile_options(corvid_torch_smoke PRIVATE /W3 /WX- /bigobj)
-    # Delay-load core torch DLLs so they init after CRT is fully set up,
-    # avoiding the FAST_FAIL_INCORRECT_STACK crash in ucrtbase.dll DllMain.
-    target_link_options(corvid_torch_smoke PRIVATE
-      /DELAYLOAD:torch.dll /DELAYLOAD:torch_cpu.dll /DELAYLOAD:torch_cuda.dll)
-    target_link_libraries(corvid_torch_smoke PRIVATE delayimp.lib)
-    # Copy torch DLLs next to the exe post-build (exclude torch_python.dll — it
-    # requires a live Python interpreter and crashes DllMain in standalone exes)
-    file(GLOB _torch_dlls "${CORVID_TORCH_PREFIX}/../../../lib/*.dll")
-    list(FILTER _torch_dlls EXCLUDE REGEX "torch_python\\.dll$")
-    add_custom_command(TARGET corvid_torch_smoke POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${_torch_dlls} $<TARGET_FILE_DIR:corvid_torch_smoke>)
-  else()
-    target_compile_options(corvid_torch_smoke PRIVATE -Wall -Wextra)
-  endif()
-endif()
-
-# --------------------------------------------------------------------------
-# corvid_m1 — M1/M2/M3 alpha demo
-# --------------------------------------------------------------------------
-set(_m1_sources
+add_executable(corvid_m1
     src/main_corvid.cpp
     cognition/Perception.cpp
-    cognition/Reflection.cpp)   # M13-A heuristic fallback — always compiled in
-if(CORVID_USE_TORCH)
-    list(APPEND _m1_sources cognition/RavenBrain.cpp)
-endif()
-if(CORVID_USE_LLM)
-    list(APPEND _m1_sources cognition/LlmReflection.cpp)
-endif()
-add_executable(corvid_m1 ${_m1_sources})
-target_link_libraries(corvid_m1 PRIVATE al)
+    cognition/Reflection.cpp
+    cognition/RavenBrain.cpp
+    cognition/LlmReflection.cpp)
+target_link_libraries(corvid_m1 PRIVATE al Threads::Threads)
+# RavenNet (hand-rolled) and threaded procedural reflection are always on now.
+target_compile_definitions(corvid_m1 PRIVATE CORVID_USE_RAVENNET CORVID_USE_LLM)
 corvid_target_flags(corvid_m1)
-
-if(CORVID_USE_TORCH)
-    target_link_libraries(corvid_m1 PRIVATE "${TORCH_LIBRARIES}")
-    target_include_directories(corvid_m1 PRIVATE ${TORCH_INCLUDE_DIRS})
-    target_compile_definitions(corvid_m1 PRIVATE CORVID_USE_RAVENNET)
-    set_property(TARGET corvid_m1 PROPERTY CXX_STANDARD 17)
-    if(MSVC)
-        target_compile_options(corvid_m1 PRIVATE /bigobj)
-        target_link_options(corvid_m1 PRIVATE
-            /DELAYLOAD:torch.dll /DELAYLOAD:torch_cpu.dll /DELAYLOAD:torch_cuda.dll)
-        target_link_libraries(corvid_m1 PRIVATE delayimp.lib)
-        file(GLOB _m1_torch_dlls "${CORVID_TORCH_PREFIX}/../../../lib/*.dll")
-        list(FILTER _m1_torch_dlls EXCLUDE REGEX "torch_python\\.dll$")
-        add_custom_command(TARGET corvid_m1 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${_m1_torch_dlls} $<TARGET_FILE_DIR:corvid_m1>)
-    endif()
-endif()
-
-if(CORVID_USE_LLM)
-    target_compile_definitions(corvid_m1 PRIVATE CORVID_USE_LLM)
-    target_link_libraries(corvid_m1 PRIVATE llama)
-    target_include_directories(corvid_m1 PRIVATE
-        ${llama_cpp_SOURCE_DIR}
-        ${llama_cpp_SOURCE_DIR}/include
-        ${llama_cpp_SOURCE_DIR}/ggml/include)
-    if(MSVC)
-        target_compile_options(corvid_m1 PRIVATE /bigobj)
-    endif()
-endif()
 
 # --------------------------------------------------------------------------
 # corvid_m2_test — Kahan EMA unit tests (M2 acceptance, spec §3.10.6)
@@ -228,21 +82,25 @@ else()
     target_compile_options(corvid_m2_test PRIVATE -Wall -Wextra)
 endif()
 
-if(CORVID_USE_LLM)
-  add_executable(corvid_llm_smoke
-    src/main_llm_smoke.cpp
-    cognition/LlmSmoke.cpp
-  )
-  target_link_libraries(corvid_llm_smoke PRIVATE al llama)
-  target_include_directories(corvid_llm_smoke PRIVATE
-    ${CORVID_INCLUDE_DIRS}
-    ${llama_cpp_SOURCE_DIR}
-    ${llama_cpp_SOURCE_DIR}/include
-    ${llama_cpp_SOURCE_DIR}/ggml/include
-  )
-  if(MSVC)
-    target_compile_options(corvid_llm_smoke PRIVATE /W3 /WX-)
-  else()
-    target_compile_options(corvid_llm_smoke PRIVATE -Wall -Wextra -fno-omit-frame-pointer)
-  endif()
+# --------------------------------------------------------------------------
+# corvid_brain_smoke — native RavenNet numeric check (no allolib needed)
+# --------------------------------------------------------------------------
+add_executable(corvid_brain_smoke test/test_ravenbrain.cpp cognition/RavenBrain.cpp)
+target_include_directories(corvid_brain_smoke PRIVATE ${CORVID_INCLUDE_DIRS})
+if(MSVC)
+    target_compile_options(corvid_brain_smoke PRIVATE /W3 /WX-)
+else()
+    target_compile_options(corvid_brain_smoke PRIVATE -Wall -Wextra)
+endif()
+
+# --------------------------------------------------------------------------
+# corvid_lens_smoke — tuned-lens readout check (Part B Phase 6, no allolib)
+# --------------------------------------------------------------------------
+add_executable(corvid_lens_smoke
+    test/test_lens.cpp cognition/Lens.cpp cognition/RavenBrain.cpp)
+target_include_directories(corvid_lens_smoke PRIVATE ${CORVID_INCLUDE_DIRS})
+if(MSVC)
+    target_compile_options(corvid_lens_smoke PRIVATE /W3 /WX-)
+else()
+    target_compile_options(corvid_lens_smoke PRIVATE -Wall -Wextra)
 endif()
