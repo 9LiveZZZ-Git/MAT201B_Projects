@@ -56,7 +56,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   }
 
   void onDraw(Graphics& g) override {
-    g.clear(0.015f, 0.015f, 0.03f);   // near-black void
+    g.clear(0.03f, 0.03f, 0.05f);     // subtly-lifted void (reads better in the dome)
     field.draw(g, 1.f);
   }
 

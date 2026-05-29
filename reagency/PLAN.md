@@ -8,6 +8,12 @@ words are the shadow work feeding the machine's "magic").*
 > v2 integrates the author's five concept decisions and a six-dimension adversarial
 > red-team of v1 (compliance, dome determinism, data/budget, concept coherence, audio,
 > roadmap). Material changes from v1 are marked **[v2]**. Today: 2026-05-29.
+>
+> **v3 (2026-05-29) — author decision: build it properly, the date is flexible.** The
+> proper **generative-splat vessel is now REQUIRED** (not stretch), and full scope is
+> restored. The vessel is the machine's **image-to-3D hallucination of the fixated
+> cluster's representative corpus photo** — the human-trace grains dissolve *into* it.
+> The 4060 Ti factory run has already started. Changes marked **[v3]**.
 
 ---
 
@@ -19,7 +25,7 @@ words are the shadow work feeding the machine's "magic").*
 | **Decision-making** | **[v2]** The wander is **live, not a baked replay** — the machine traverses its own k-NN similarity graph on the primary, choosing each step at frame time. Suits the **endless wander**. |
 | **Embedding space** | Multimodal CLIP — **words + images** share one space. |
 | **Conserved substance** | **[v2]** Galaxy points = smoke grains = vessel body are the **same particles**, re-laid-out per shell in GLSL. One buffer, three views. |
-| **Central form** | **[v2]** Default vessel = **procedural GLSL morph of the shared particles** (no runtime ML, off the critical path). Distilled Gaussian-splat bank is an **optional stretch swap**. |
+| **Central form** | **[v3]** **Proper generative-splat vessel (REQUIRED).** Offline **image-to-3D** (LGM/DreamGaussian) of cluster-representative corpus photos → distilled **VSLB** keyframe bank → live morph/melt. The procedural GLSL morph is now only the pre-asset fallback. |
 | **Human trace (thesis)** | **[v2]** On each fixation of an image, its **actual photograph surfaces for a beat, then is re-abstracted into a grain.** This visible dissolve *is* the act of ceding. |
 | **Loop** | Vessel↔galaxy by **slow bleed** (shell crossfade), made causal: the fixated cluster's grains are what form the body. |
 | **Corpus** | Images + words about **agency / magic / labor**, CC0/public-domain with attribution (Art Institute of Chicago + Cleveland Museum of Art APIs, + the corvid crow set). **Fetched** — see §3. |
@@ -329,7 +335,14 @@ real assets (corvid pattern, `SplatModel.cpp:208-214`).
 
 ## 12. Roadmap & calendar **[v2 — descoped + dated]**
 
-**Reality:** ~2–3 weeks to the MAT 201B final (assumed mid-June 2026 — *confirm your date*).
+**[v3] Deadline relaxed (author decision): build it properly; the date is flexible.** The
+REQUIRED/NICE/STRETCH tiers below are no longer a triage list gated on a hard date — the
+smoke shell, the **proper generative-splat vessel**, full spatial audio, labels, and the
+dome are all in scope. Treat the ordering as a sensible build sequence. The splat factory
+(Stage D) runs in parallel on the 4060 Ti (already started). Original date-driven framing
+retained below for reference only.
+
+**Original (date-driven) framing — superseded by v3:** ~2–3 weeks to the MAT 201B final.
 v1's M0–M7 was broader than corvid's entire 6-week arc *plus* a new ML pipeline — not
 shippable. So milestones are now **REQUIRED** vs **NICE-TO-HAVE**, with a hard freeze and a
 pre-agreed descope order. **Gradeable artifact = a desktop video capture**, so dome-hardware
@@ -389,6 +402,12 @@ concept isn't done regardless of engine quality. (This is the test corvid never 
 ---
 
 ## 15. Revision log
+- **v3 (2026-05-29):** Author decision — build it properly, date flexible. Proper
+  generative-splat vessel promoted to REQUIRED: image-to-3D (LGM/DreamGaussian) of each
+  fixated cluster's representative corpus photo → distilled VSLB keyframe bank → live
+  morph; the human-trace grains dissolve into it. Full scope restored (smoke + vessel +
+  full spatial audio + labels + dome). Adds factory Stage D + runtime VesselSplats. Galaxy
+  bloom/brightness tuned for dome washout.
 - **v2 (2026-05-29):** Integrated 5 author decisions + 6-dimension red-team. Conserved-particle
   architecture; live graph-walk with entropy-hesitation; human trace promoted to thesis;
   splat factory demoted to stretch (procedural default vessel); corpus fetched (AIC+CMA CC0);

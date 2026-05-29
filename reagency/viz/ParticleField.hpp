@@ -44,6 +44,13 @@ struct ParticleField {
   al::ShaderProgram shader_;
   bool              shader_ok_ = false;
 
+  // Look / cheap per-sprite "bloom" (no post-process; dome-bright). All one-line tunables.
+  float point_size_    = 16.f;   // sprite quad size (enlarged only to hold the glow halo)
+  float core_sigma_    = 0.22f;  // bright CORE — kept at the original ~size-7 apparent radius
+  float halo_sigma_    = 0.55f;  // soft glow radius
+  float halo_strength_ = 0.50f;  // glow intensity relative to the core
+  float intensity_     = 1.70f;  // overall brightness (AlloSphere projector washout headroom)
+
   bool loadPoints(const std::string& path);
   void synthesize(int n);   // procedural fallback galaxy
   void buildMesh();         // ONCE

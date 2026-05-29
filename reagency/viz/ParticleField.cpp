@@ -17,28 +17,33 @@ uniform mat4 al_ProjectionMatrix;
 uniform float uPointSize;
 layout (location = 0) in vec3 vertexPosition;
 layout (location = 1) in vec4 vertexColor;   // rgb + alpha
-layout (location = 2) in vec2 vertexTexCoord; // x = sigma
 out vec4 vcol;
-out float vsigma;
 void main() {
   vcol = vertexColor;
-  vsigma = max(vertexTexCoord.x, 0.05);
   gl_Position = al_ProjectionMatrix * al_ModelViewMatrix * vec4(vertexPosition, 1.0);
   gl_PointSize = uPointSize;
 }
 )GLSL";
 
+// Per-sprite "bloom": a tight bright CORE plus a soft wide HALO, summed. Dense
+// regions bloom for free via additive overlap. No FBO / no post-process pass, so
+// it composes with omni/dome rendering and costs only a little fragment work.
 static const char* kFrag = R"GLSL(
 #version 330
 in vec4 vcol;
-in float vsigma;
 out vec4 fragColor;
+uniform float uCore;       // bright-center sigma (small)
+uniform float uHalo;       // glow sigma (wide)
+uniform float uHaloStr;    // glow strength
+uniform float uIntensity;  // overall brightness
 void main() {
   vec2 c = gl_PointCoord * 2.0 - 1.0;
   float r2 = dot(c, c);
   if (r2 > 1.0) discard;
-  float g = exp(-r2 / (2.0 * vsigma * vsigma));
-  fragColor = vec4(vcol.rgb, vcol.a * g);   // additive blend in draw()
+  float core = exp(-r2 / (2.0 * uCore * uCore));
+  float halo = exp(-r2 / (2.0 * uHalo * uHalo));
+  float i = core + uHaloStr * halo;
+  fragColor = vec4(vcol.rgb * uIntensity, vcol.a * i);   // additive blend in draw()
 }
 )GLSL";
 
@@ -114,7 +119,7 @@ void ParticleField::buildMesh() {
   mesh_.reset();
   mesh_.primitive(Mesh::POINTS);
   for (const auto& s : pts_) {
-    float a = 0.22f + 0.6f * s.density;
+    float a = 0.30f + 0.65f * s.density;  // brighter base for AlloSphere washout
     mesh_.vertex(s.pos.x, s.pos.y, s.pos.z);
     mesh_.color(s.col.x, s.col.y, s.col.z, a);
     mesh_.texCoord(s.sigma, 0.f);
@@ -154,8 +159,12 @@ void ParticleField::draw(Graphics& g, float pointScale) {
   g.blending(true);
   g.blendAdd();
   g.shader(shader_);
-  g.shader().uniform("uPointSize", 7.f * pointScale);
-  g.pointSize(7.f * pointScale);  // fallback for drivers ignoring gl_PointSize
+  g.shader().uniform("uPointSize", point_size_ * pointScale);
+  g.shader().uniform("uCore",      core_sigma_);
+  g.shader().uniform("uHalo",      halo_sigma_);
+  g.shader().uniform("uHaloStr",   halo_strength_);
+  g.shader().uniform("uIntensity", intensity_);
+  g.pointSize(point_size_ * pointScale);  // fallback for drivers ignoring gl_PointSize
   g.draw(mesh_);
   g.blendTrans();
   g.depthTesting(true);
