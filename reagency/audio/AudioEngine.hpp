@@ -72,6 +72,8 @@ class AudioEngine {
   std::atomic<float> cClusterRoot_{220.f};
   std::atomic<int>   cClusterId_{0}, cVisits_{0};
   std::atomic<float> cMoodBright_{0.5f}, cMoodDens_{0.3f}, cMoodWet_{0.3f};
+  // arrangement gates (sim sets per-section targets; audio glides) + dubstep growl amount
+  std::atomic<float> cDroneGate_{1.f}, cWhisperGate_{1.f}, cGrainGate_{1.f}, cGrowl_{0.f};
 
   // ---------- sim-side state ----------
   std::vector<std::pair<float, int>> mel_;
@@ -84,6 +86,8 @@ class AudioEngine {
   uint32_t    sprng_ = 0x55AA55AAu;
   float       moodTimer_ = 0.f, moodBright_ = 0.5f, moodDens_ = 0.3f, moodWet_ = 0.3f;
   float       mbTgt_ = 0.5f, mdTgt_ = 0.3f, mwTgt_ = 0.3f;
+  // arrangement section + recognizable public-domain melody player (sim thread)
+  int         section_ = 0, melTune_ = 0, melNote_ = 0; bool melodyOn_ = false; float melNoteTimer_ = 0.f;
 
   // ---------- audio-side voices ----------
   struct Voice {
@@ -120,6 +124,10 @@ class AudioEngine {
   float grainTimer_ = 0.f; uint32_t rng_ = 0x9E3779B9u; float frand();
   int   lastClusterId_ = -999;
   float duckGain_ = 1.f, lowDuck_ = 1.f;               // bed + low-end duck under the whisper
+  // arrangement gates (glided) + dubstep growl LFO/filter + ping-pong delay (grains+whispers)
+  float droneGate_ = 1.f, whisperGate_ = 1.f, grainGate_ = 1.f, growl_ = 0.f;
+  float wobPhase_ = 0.f, growlLp_ = 0.f, growlBp_ = 0.f, wobMult_ = 1.f, wobChange_ = 0.f;
+  std::vector<float> ppL_, ppR_; int ppN_ = 0, ppPos_ = 0;
   float panLFO_ = 0.f;
   float lastDepth_ = 1.f, moodLP_ = 1.f, tension_ = 0.f, padBloom_ = 1.f, reverbWet_ = 0.3f;
   float masterLoL_ = 0.f, masterLoR_ = 0.f, masterHiL_ = 0.f, masterHiR_ = 0.f;
@@ -133,6 +141,7 @@ class AudioEngine {
   void fireKick();
   void fireTimp();          // pitched timpani on the 2nd Euclidean
   void fireClang();         // industrial metallic FX
+  void fireAnd();           // subtle off-beat "and" tick accenting the main beat
   float jiBassHz() const;
 };
 

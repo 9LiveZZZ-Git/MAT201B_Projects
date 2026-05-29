@@ -13,6 +13,17 @@ static constexpr float kPI  = 3.14159265358979f;
 static constexpr float kTAU = 6.28318530717959f;
 static const float kJI[8] = {1.f, 16.f / 15.f, 6.f / 5.f, 5.f / 4.f, 4.f / 3.f, 3.f / 2.f, 7.f / 4.f, 2.f};
 
+// Recognizable PUBLIC-DOMAIN melodies (semitone offsets from tonic, + beat-durations). The top
+// grains occasionally coalesce into one of these (a familiar quote inside the machine's texture).
+struct Tune { const int* s; const int* d; int n; };
+static const int TW_S[] = {0,0,7,7,9,9,7, 5,5,4,4,2,2,0};            // Twinkle Twinkle / Ah vous dirai-je
+static const int TW_D[] = {1,1,1,1,1,1,2, 1,1,1,1,1,1,2};
+static const int OJ_S[] = {4,4,5,7,7,5,4,2,0,0,2,4,4,2,2};          // Ode to Joy (Beethoven)
+static const int OJ_D[] = {1,1,1,1,1,1,1,1,1,1,1,1,1,2,2};
+static const int FJ_S[] = {0,2,4,0,0,2,4,0,4,5,7,4,5,7};            // Frere Jacques
+static const int FJ_D[] = {1,1,1,1,1,1,1,1,1,1,2,1,1,2};
+static const Tune TUNES[3] = {{TW_S, TW_D, 14}, {OJ_S, OJ_D, 15}, {FJ_S, FJ_D, 14}};
+
 static inline float dn(float x) { return (std::fabs(x) < 1e-15f) ? 0.f : x; }
 static inline float clamp01(float x) { return x < 0.f ? 0.f : (x > 1.f ? 1.f : x); }
 static inline float gco(float tau, int nf, double sr) { return 1.f - std::exp(-float(nf) / (float(sr) * tau)); }
@@ -119,6 +130,8 @@ void AudioEngine::init(const std::string& assetDir, double sampleRate) {
   reverb_.bandwidth(0.9f); reverb_.damping(0.45f); reverb_.decay(0.9f);
   cClusterRoot_.store(root_, std::memory_order_relaxed); subHz_ = root_ * 0.25f;
   for (int p = 0; p < PADN; ++p) padHz_[p] = root_ * kJI[p == 0 ? 0 : (p == 1 ? 2 : (p == 2 ? 5 : 7))];
+  ppN_ = int(sr_ * 0.55);                              // ping-pong delay buffers (allocated once)
+  ppL_.assign(ppN_, 0.f); ppR_.assign(ppN_, 0.f); ppPos_ = 0;
   ready_.store(true, std::memory_order_release);
 }
 
@@ -180,9 +193,33 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
   // mood scheduler on FIBONACCI-second intervals
   static const float FIB[6] = {8.f, 13.f, 21.f, 34.f, 55.f, 89.f};
   auto sr = [&]() { sprng_ ^= sprng_ << 13; sprng_ ^= sprng_ >> 17; sprng_ ^= sprng_ << 5; return float(sprng_) / 4294967296.f; };
-  moodTimer_ -= dt; if (moodTimer_ <= 0.f) { moodTimer_ = FIB[int(sr() * 6.f) % 6]; mbTgt_ = sr(); mdTgt_ = sr(); mwTgt_ = sr(); }
+  moodTimer_ -= dt;
+  if (moodTimer_ <= 0.f) {
+    moodTimer_ = FIB[int(sr() * 6.f) % 6]; mbTgt_ = sr(); mdTgt_ = sr(); mwTgt_ = sr();
+    // arrangement SECTION (FULL most common): 0 full, 1 drone-pause, 2 growl, 3 sparse, 4 melody
+    float r = sr(); section_ = (r < 0.42f) ? 0 : (r < 0.56f) ? 1 : (r < 0.70f) ? 2 : (r < 0.84f) ? 3 : 4;
+    float dG = 1.f, wG = 1.f, gG = 1.f, grw = 0.f;
+    if (section_ == 1) dG = 0.f;                                  // the drone pauses
+    else if (section_ == 2) grw = 1.f;                            // dubstep growl on the low end
+    else if (section_ == 3) { dG = 0.10f; wG = 0.20f; gG = 0.12f; }  // ensemble drops to near-silence
+    else if (section_ == 4) { gG = 0.22f; melodyOn_ = true; melNote_ = 0; melTune_ = int(sr() * 3.f) % 3; melNoteTimer_ = 0.f; }
+    if (section_ != 4) melodyOn_ = false;
+    cDroneGate_.store(dG, std::memory_order_relaxed); cWhisperGate_.store(wG, std::memory_order_relaxed);
+    cGrainGate_.store(gG, std::memory_order_relaxed); cGrowl_.store(grw, std::memory_order_relaxed);
+  }
   float mc = std::min(1.f, dt * 0.25f); moodBright_ += (mbTgt_ - moodBright_) * mc; moodDens_ += (mdTgt_ - moodDens_) * mc; moodWet_ += (mwTgt_ - moodWet_) * mc;
   cMoodBright_.store(moodBright_, std::memory_order_relaxed); cMoodDens_.store(moodDens_, std::memory_order_relaxed); cMoodWet_.store(moodWet_, std::memory_order_relaxed);
+  // recognizable PD melody: emit the next note ~once per beat; grains gated down so it emerges
+  if (melodyOn_) {
+    melNoteTimer_ -= dt;
+    if (melNoteTimer_ <= 0.f) {
+      const Tune& t = TUNES[melTune_ % 3];
+      if (melNote_ >= t.n) { melodyOn_ = false; cGrainGate_.store(1.f, std::memory_order_relaxed); }
+      else { float beat = 1.f / std::max(0.5f, slotRate(depth, hesitation, activity_)); melNoteTimer_ = beat * float(t.d[melNote_]);
+        // pitched glockenspiel/kalimba (pluck pool repitches; agogo bells would not) one octave up
+        Ev e{}; e.kind = EV_NOTE; e.layer = 0; e.hz = root_ * std::pow(2.f, float(t.s[melNote_] + 12) / 12.f); e.amp = 0.18f; e.pan = 0.f; push(e); ++melNote_; }
+    }
+  }
 
   // primary Euclidean (kick) + 2nd coprime Euclidean (timpani)
   int k = 2 + std::min(6, visits_ / 20);
@@ -244,6 +281,7 @@ float AudioEngine::tickVoice(Voice& v, float isr, float depth, float bright) {
   v.age += isr; if (v.age >= v.life) { v.on = false; return 0.f; } const float u = v.age / v.life;
   if (v.layer == 6) { float fk = 48.f + 100.f * std::exp(-v.age / 0.030f); v.phase += fk * isr; if (v.phase >= 1.f) v.phase -= 1.f;
     float click = (v.age < 0.004f) ? (1.f - v.age / 0.004f) * (vrand(v.grng) * 2.f - 1.f) * 0.6f : 0.f; return (std::sin(kTAU * v.phase) * std::exp(-v.age / 0.10f) + click) * v.amp; }
+  if (v.layer == 9) { float n = vrand(v.grng) * 2.f - 1.f; v.lp = dn(v.lp + 0.5f * (n - v.lp)); return (n - v.lp) * std::exp(-v.age / 0.0035f) * v.amp; }   // off-beat "and" click (high-passed)
   if (v.smp) { if (v.smpPos >= v.smpLen - 2) { v.on = false; return 0.f; } int i0 = int(v.smpPos); float fr = v.smpPos - i0; float s = v.smp[i0]*(1.f-fr) + v.smp[i0+1]*fr; v.smpPos += v.smpRate;
     float env; if (v.layer == 3 || v.layer == 5) env = (u < (v.atk/v.life)) ? (u/std::max(1e-4f, v.atk/v.life)) : (u < 0.6f ? 1.f : std::max(0.f, 1.f-(u-0.6f)/0.4f));
     else { float a = v.atk/v.life; env = (u < a) ? (u/std::max(1e-4f,a)) : (u > 0.85f ? (1.f-(u-0.85f)/0.15f) : 1.f); } return s * env * v.amp; }
@@ -265,6 +303,7 @@ float AudioEngine::tickVoice(Voice& v, float isr, float depth, float bright) {
 void AudioEngine::fireKick() { Ev e{}; e.kind = EV_NOTE; e.layer = 6; e.hz = jiBassHz(); e.amp = (euStep_ == 0) ? 0.55f : 0.38f; e.pan = 0.f; schedule(e); }
 void AudioEngine::fireTimp() { timpDeg_ = (timpDeg_ + 1 + int(frand() * 2.f)) % (modeN_ * 2); Ev e{}; e.kind = EV_NOTE; e.layer = 7; e.hz = degHz(timpDeg_) * 0.5f; e.amp = 0.24f; e.pan = 0.18f * (2.f * frand() - 1.f); schedule(e); }
 void AudioEngine::fireClang() { Ev e{}; e.kind = EV_NOTE; e.layer = 8; e.hz = 60.f + 200.f * frand(); e.amp = 0.14f + 0.10f * frand(); e.pan = 0.8f * (2.f * frand() - 1.f); schedule(e); }
+void AudioEngine::fireAnd() { int i = allocCapped(9, 3); if (i < 0) return; Voice& v = vox_[i]; v = Voice{}; v.on = true; v.layer = 9; v.life = 0.05f; v.age = 0.f; v.amp = 0.07f; v.pan = 0.1f * (2.f * frand() - 1.f); v.grng = rng_ ^ uint32_t(i * 668265263u); }
 
 void AudioEngine::render(al::AudioIOData& io) {
   const int nf = int(io.framesPerBuffer()), nch = int(io.channelsOut());
@@ -291,6 +330,11 @@ void AudioEngine::render(al::AudioIOData& io) {
   bool whisperOn = false; for (auto& v : vox_) if (v.on && v.layer == 4) { whisperOn = true; break; }
   duckGain_ += ((whisperOn ? 0.6f : 1.f) - duckGain_) * gco(0.25f, nf, sr_);
   lowDuck_  += ((whisperOn ? 0.8f : 1.f) - lowDuck_) * gco(0.25f, nf, sr_);
+  // arrangement gates: drone pause / ensemble drop-outs / dubstep growl (glided, no clicks)
+  droneGate_   += (cDroneGate_.load(std::memory_order_relaxed)   - droneGate_)   * gco(0.5f, nf, sr_);
+  whisperGate_ += (cWhisperGate_.load(std::memory_order_relaxed) - whisperGate_) * gco(0.4f, nf, sr_);
+  grainGate_   += (cGrainGate_.load(std::memory_order_relaxed)   - grainGate_)   * gco(0.5f, nf, sr_);
+  growl_       += (cGrowl_.load(std::memory_order_relaxed)       - growl_)       * gco(0.4f, nf, sr_);
 
   float decay = std::min(0.985f, 0.86f + 0.10f * (1.f - depth)), damp = 0.35f + 0.30f * (1.f - depth);
   if (std::fabs(decay - lastDecay_) > 1e-3f) { reverb_.decay(decay); lastDecay_ = decay; }
@@ -299,6 +343,12 @@ void AudioEngine::render(al::AudioIOData& io) {
   const float isr = 1.f / float(sr_), master = 0.28f;
   const float aLo = 1.f - std::exp(-kTAU * 300.f / float(sr_)), aHi = 1.f - std::exp(-kTAU * 3000.f / float(sr_));
   const float slot = slotRate(depth, hes, act);
+  // dubstep growl wobble rate VARIES a lot: re-pick a musical multiple of the beat every ~0.5-2 s,
+  // and add a slow continuous sweep so the wub is never static.
+  wobChange_ -= float(nf) * isr;
+  if (wobChange_ <= 0.f) { static const float WM[8] = {0.5f, 1.f, 1.5f, 2.f, 3.f, 4.f, 6.f, 8.f};
+    wobMult_ = WM[int(frand() * 8.f) % 8]; wobChange_ = 0.5f + 1.6f * frand(); }
+  const float wobHz = slot * wobMult_ * (1.f + 0.25f * std::sin(kTAU * panLFO_ * 1.7f));
   const float fifthB = 1.5f - 0.006f * tension_;
   const float padRatio[PADN] = {1.f, kJI[2], 1.5f, 2.f};
 
@@ -317,16 +367,32 @@ void AudioEngine::render(al::AudioIOData& io) {
     float bedL = 0.f, bedR = 0.f, leadL = 0.f, leadR = 0.f, lowMono = 0.f, revSend = 0.f;
     panLFO_ += 0.05f * isr; if (panLFO_ >= 1.f) panLFO_ -= 1.f; float drift = 0.25f * std::sin(kTAU * panLFO_);
 
+    float euPrev = euPhase_;
     euPhase_ += slot * isr; if (euPhase_ >= 1.f) { euPhase_ -= 1.f; euStep_ = (euStep_ + 1) % euLen_; if ((euMask_ >> euStep_) & 1u) fireKick(); }
+    if (euPrev < 0.5f && euPhase_ >= 0.5f) fireAnd();     // the off-beat "and"
     euPhase2_ += slot * 0.5f * isr; if (euPhase2_ >= 1.f) { euPhase2_ -= 1.f; euStep2_ = (euStep2_ + 1) % euLen2_; if ((euMask2_ >> euStep2_) & 1u) fireTimp(); }
+    wobPhase_ += wobHz * isr; if (wobPhase_ >= 1.f) wobPhase_ -= 1.f;
 
     // Risset ticks (textural; fired directly so the accelerando stays coherent)
     for (int i = 0; i < RIS; ++i) { risPh_[i] += risTempo[i] * isr; if (risPh_[i] >= 1.f) { risPh_[i] -= 1.f; if (risGain[i] > 0.06f) { int gi = allocCapped(2, 28);
-      if (gi >= 0) { Voice& g = vox_[gi]; g = Voice{}; g.on = true; g.layer = 2; g.hz = degHz(modeN_ * 2 + i); g.K = 2; g.pm[0] = 1; g.pm[1] = 2; g.pa[0] = 1; g.pa[1] = 0.3f; g.pnorm = 1.3f; g.amp = 0.022f * risGain[i]; g.life = 0.012f; g.pan = 0.6f * (2.f * frand() - 1.f); g.grng = rng_ ^ uint32_t(gi * 2246822519u); } } } }
+      if (gi >= 0) { Voice& g = vox_[gi]; g = Voice{}; g.on = true; g.layer = 2; g.hz = degHz(modeN_ * 2 + i); g.K = 2; g.pm[0] = 1; g.pm[1] = 2; g.pa[0] = 1; g.pa[1] = 0.3f; g.pnorm = 1.3f; g.amp = 0.022f * risGain[i] * grainGate_; g.life = 0.012f; g.pan = 0.6f * (2.f * frand() - 1.f); g.grng = rng_ ^ uint32_t(gi * 2246822519u); } } } }
 
-    // sub pedal (centred, dry; fixed LP so level is deterministic)
+    // sub pedal (centred, dry). In a GROWL section it becomes a dubstep wobble: a resonant SVF
+    // whose cutoff + amplitude wobble with wobPhase_, saturated for grit. droneGate pauses it.
     subHz_ += (padRoot * 0.5f - subHz_) * 0.0004f; subPhase_ += subHz_ * isr; if (subPhase_ >= 1.f) subPhase_ -= 1.f;
-    float subS = std::sin(kTAU * subPhase_) + 0.3f * std::sin(kTAU * subPhase_ * 2.f); subLp_ = dn(subLp_ + 0.12f * (subS - subLp_)); lowMono += subLp_ * subAmp_;
+    float subS = std::sin(kTAU * subPhase_) + 0.3f * std::sin(kTAU * subPhase_ * 2.f);
+    subLp_ = dn(subLp_ + 0.12f * (subS - subLp_));
+    float subOut = subLp_;
+    if (growl_ > 0.01f) {
+      float wob = 0.5f - 0.5f * std::cos(kTAU * wobPhase_);
+      float ff = 2.f * std::sin(kPI * std::min(90.f + 520.f * wob, float(sr_) * 0.45f) / float(sr_));
+      growlLp_ = dn(growlLp_ + ff * growlBp_);
+      float hp = subS - growlLp_ - 0.18f * growlBp_;
+      growlBp_ = dn(growlBp_ + ff * hp);
+      float g = std::tanh(2.4f * growlLp_) * (0.4f + 0.6f * wob);
+      subOut = subOut * (1.f - growl_) + g * growl_ * 1.5f;
+    }
+    lowMono += subOut * subAmp_ * droneGate_;
 
     // MOVING JI drone: per-partial slow tremolo + detune drift + vibrato
     for (int p = 0; p < PADN; ++p) {
@@ -341,7 +407,7 @@ void AudioEngine::render(al::AudioIOData& io) {
       padLp_[p] = dn(padLp_[p] + (0.12f + 0.40f * depth) * (sg - padLp_[p]));
       float trem = 0.72f + 0.28f * std::sin(kTAU * padTrem_[p]);                    // slow amplitude swell
       float tgtAmp = ((p < 2) ? 0.10f : 0.10f * padBloom_) * trem; padAmp_[p] += (tgtAmp - padAmp_[p]) * 0.002f;
-      float a = padAmp_[p] * padLp_[p];
+      float a = padAmp_[p] * padLp_[p] * droneGate_;       // drone pauses / drops out by section
       float pan = (p == 0) ? 0.f : (p == 1 ? -0.55f : (p == 2 ? 0.55f : 0.78f)); pan += 0.12f * drift; float pp = 0.5f * (pan + 1.f);
       bedL += a * std::cos(pp * 1.5707963f); bedR += a * std::sin(pp * 1.5707963f); revSend += a * 0.8f;
     }
@@ -361,13 +427,30 @@ void AudioEngine::render(al::AudioIOData& io) {
     grainTimer_ -= isr;
     if (grainTimer_ <= 0.f) { float lam = 5.f + 30.f * clamp01(0.3f * act + 0.3f * (1.f - depth) + 0.4f * hes + 0.4f * md); grainTimer_ += -std::log(std::max(1e-6f, frand())) / lam;
       int gi = allocCapped(2, 28); if (gi >= 0) { Voice& g = vox_[gi]; g = Voice{}; g.on = true; g.layer = 2; int oc = int(frand() * 4.f) - 1; g.hz = degHz(nodeDegree(int(rng_ & 2047), -1)) * std::pow(2.f, float(oc));
-        g.K = 2; g.pm[0] = 1; g.pm[1] = 2; g.pa[0] = 1; g.pa[1] = 0.25f + 0.4f * frand(); g.pnorm = 1.f + g.pa[1]; g.amp = 0.022f + 0.04f * act * (0.5f + frand()); g.life = 0.02f + 0.18f * frand(); g.pan = 0.9f * (2.f * frand() - 1.f); g.grng = rng_ ^ (uint32_t(gi) * 40503u); } }
+        g.K = 2; g.pm[0] = 1; g.pm[1] = 2; g.pa[0] = 1; g.pa[1] = 0.25f + 0.4f * frand(); g.pnorm = 1.f + g.pa[1]; g.amp = (0.022f + 0.04f * act * (0.5f + frand())) * grainGate_; g.life = 0.02f + 0.18f * frand(); g.pan = 0.9f * (2.f * frand() - 1.f); g.grng = rng_ ^ (uint32_t(gi) * 40503u); } }
 
     // pooled voices
-    for (auto& v : vox_) { if (!v.on) continue; float s = tickVoice(v, isr, depth, moodLP_);
-      if (v.layer == 4) { float pp = 0.5f * (v.pan + drift + 1.f); pp = pp < 0 ? 0 : (pp > 1 ? 1 : pp); leadL += 1.05f * s * std::cos(pp * 1.5707963f); leadR += 1.05f * s * std::sin(pp * 1.5707963f); revSend += s * 1.4f; }
-      else if (v.layer == 6 || v.layer == 7) { lowMono += s; }     // kick + timpani -> centre/low, dry
-      else { float pan = v.pan + (v.layer == 2 || v.layer == 8 ? drift : 0.f); float pp = 0.5f * (pan + 1.f); pp = pp < 0 ? 0 : (pp > 1 ? 1 : pp); bedL += s * std::cos(pp * 1.5707963f); bedR += s * std::sin(pp * 1.5707963f); revSend += s * 0.5f; } }
+    float ppSendL = 0.f, ppSendR = 0.f;
+    for (auto& v : vox_) {
+      if (!v.on) continue; float s = tickVoice(v, isr, depth, moodLP_);
+      if (v.layer == 4) {                                  // whisper: lead (gated), and into the delay
+        float pp = 0.5f * (v.pan + drift + 1.f); pp = pp < 0 ? 0 : (pp > 1 ? 1 : pp);
+        float cL = std::cos(pp * 1.5707963f), cR = std::sin(pp * 1.5707963f);
+        leadL += whisperGate_ * 1.05f * s * cL; leadR += whisperGate_ * 1.05f * s * cR;
+        ppSendL += whisperGate_ * 0.5f * s * cL; ppSendR += whisperGate_ * 0.5f * s * cR; revSend += s * whisperGate_ * 1.4f;
+      } else if (v.layer == 9) { leadL += 0.8f * s; leadR += 0.8f * s; }   // "and" tick: dry, centred, un-ducked
+      else if (v.layer == 6 || v.layer == 7) { lowMono += s; }
+      else {
+        float pan = v.pan + (v.layer == 2 || v.layer == 8 ? drift : 0.f); float pp = 0.5f * (pan + 1.f); pp = pp < 0 ? 0 : (pp > 1 ? 1 : pp);
+        float cL = std::cos(pp * 1.5707963f), cR = std::sin(pp * 1.5707963f);
+        bedL += s * cL; bedR += s * cR; revSend += s * 0.5f;
+        if (v.layer == 2) { ppSendL += 0.55f * s * cL; ppSendR += 0.55f * s * cR; }   // grains -> delay
+      }
+    }
+    // ping-pong delay (grains + whispers bounce L<->R)
+    { float dL = ppL_[ppPos_], dR = ppR_[ppPos_];
+      ppL_[ppPos_] = dn(ppSendL + dR * 0.42f); ppR_[ppPos_] = dn(ppSendR + dL * 0.42f); ppPos_ = (ppPos_ + 1) % ppN_;
+      bedL += dL * 0.32f; bedR += dR * 0.32f; }
 
     float w1 = 0.f, w2 = 0.f; reverb_(revSend * 0.5f, w1, w2, 0.6f);
     float L = duckGain_ * bedL + leadL + lowDuck_ * lowMono + reverbWet_ * w1;
