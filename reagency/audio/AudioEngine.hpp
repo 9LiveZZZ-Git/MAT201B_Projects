@@ -111,11 +111,12 @@ class AudioEngine {
   // ---------- always-on layers ----------
   static constexpr int PADN = 4;
   float padHz_[PADN] = {220, 330, 440, 550}, padPhase_[PADN] = {}, padVib_[PADN] = {}, padLp_[PADN] = {}, padAmp_[PADN] = {};
-  float padTrem_[PADN] = {}, padDrift_[PADN] = {};     // moving-drone LFOs
+  float padTrem_[PADN] = {}, padDrift_[PADN] = {}, padHp_[PADN] = {};   // moving-drone LFOs + high-pass (off the sub-bass)
+  float triPhase_ = 0.f, triHz_ = 55.f;                // pure mono triangle SUB-BASS
   float beatPhase_ = 0.f;
   float subPhase_ = 0.f, subAmp_ = 0.f, subLp_ = 0.f, subHz_ = 55.f;
   static constexpr int SHEP = 6;
-  float shepPhase_ = 0.f, shepPh_[SHEP] = {}, shepRate_ = 0.04f, shepRateTgt_ = 0.04f, shepGain_ = 0.f;
+  float shepPhase_ = 0.f, shepPh_[SHEP] = {}, shepBp_[SHEP] = {}, shepRate_ = 0.04f, shepRateTgt_ = 0.04f, shepGain_ = 0.f;  // shepPh_/shepBp_ = noise-bandpass SVF states
   float nzLp_ = 0.f, nzLp2_ = 0.f;
   uint32_t euMask_ = 0x49u; int euLen_ = 8, euStep_ = 0; float euPhase_ = 0.f;
   uint32_t euMask2_ = 0x15u; int euLen2_ = 5, euStep2_ = 0; float euPhase2_ = 0.f; int timpDeg_ = 0;
@@ -128,7 +129,7 @@ class AudioEngine {
   // arrangement gates (glided) + dubstep growl LFO/filter + ping-pong delay (grains+whispers)
   float droneGate_ = 1.f, whisperGate_ = 1.f, grainGate_ = 1.f, growl_ = 0.f;
   float wobPhase_ = 0.f, growlLp_ = 0.f, growlBp_ = 0.f, wobMult_ = 1.f, wobChange_ = 0.f;
-  float growlDuty_ = 1.f, growlDutyTgt_ = 1.f;         // sometimes off -> clean drone
+  float growlDuty_ = 1.f, growlDutyTgt_ = 1.f, growlOutLp_ = 0.f;   // sometimes off -> clean drone; LP keeps it off the bass
   float growlFmtCoef_[3][3] = {}, growlFz_[3][2] = {}, lastFmt_[3] = {0.f, 0.f, 0.f};  // talking-growl formants
   std::vector<float> ppL_, ppR_; int ppN_ = 0, ppPos_ = 0;
   float panLFO_ = 0.f;
@@ -136,6 +137,7 @@ class AudioEngine {
   float masterLoL_ = 0.f, masterLoR_ = 0.f, masterHiL_ = 0.f, masterHiR_ = 0.f;
 
   al::Reverb<float> reverb_;
+  al::Reverb<float> sampRev_;       // short mono reverb to blend the CC0 samples
   float  lastDecay_ = -1.f, lastDamp_ = -1.f;
   double sr_ = 44100.0;
   std::atomic<bool> ready_{false};

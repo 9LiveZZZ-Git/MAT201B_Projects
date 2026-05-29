@@ -128,6 +128,7 @@ void AudioEngine::init(const std::string& assetDir, double sampleRate) {
   sr_ = sampleRate > 0 ? sampleRate : 44100.0;
   loadManifest(assetDir); loadSamples(assetDir);
   reverb_.bandwidth(0.9f); reverb_.damping(0.45f); reverb_.decay(0.9f);
+  sampRev_.bandwidth(0.9f); sampRev_.damping(0.55f); sampRev_.decay(0.42f);   // short room for the samples
   cClusterRoot_.store(root_, std::memory_order_relaxed); subHz_ = root_ * 0.25f;
   for (int p = 0; p < PADN; ++p) padHz_[p] = root_ * kJI[p == 0 ? 0 : (p == 1 ? 2 : (p == 2 ? 5 : 7))];
   ppN_ = int(sr_ * 0.55); if (ppN_ < 64) ppN_ = 64;    // ping-pong delay buffers (allocated once)
@@ -280,7 +281,7 @@ void AudioEngine::trigger(const Ev& e) {
 
 float AudioEngine::tickVoice(Voice& v, float isr, float depth, float bright) {
   v.age += isr; if (v.age >= v.life) { v.on = false; return 0.f; } const float u = v.age / v.life;
-  if (v.layer == 6) { float fk = 48.f + 100.f * std::exp(-v.age / 0.030f); v.phase += fk * isr; if (v.phase >= 1.f) v.phase -= 1.f;
+  if (v.layer == 6) { float fk = 36.f + 80.f * std::exp(-v.age / 0.032f); v.phase += fk * isr; if (v.phase >= 1.f) v.phase -= 1.f;
     float click = (v.age < 0.004f) ? (1.f - v.age / 0.004f) * (vrand(v.grng) * 2.f - 1.f) * 0.6f : 0.f; return (std::sin(kTAU * v.phase) * std::exp(-v.age / 0.10f) + click) * v.amp; }
   if (v.layer == 9) { float n = vrand(v.grng) * 2.f - 1.f; v.lp = dn(v.lp + 0.5f * (n - v.lp)); return (n - v.lp) * std::exp(-v.age / 0.0035f) * v.amp; }   // off-beat "and" click (high-passed)
   if (v.smp) { if (v.smpPos >= v.smpLen - 2) { v.on = false; return 0.f; } int i0 = int(v.smpPos); float fr = v.smpPos - i0; float s = v.smp[i0]*(1.f-fr) + v.smp[i0+1]*fr; v.smpPos += v.smpRate;
@@ -324,8 +325,8 @@ void AudioEngine::render(al::AudioIOData& io) {
   tension_ = dn(tension_ + (tensionTgt - tension_) * gco(0.3f, nf, sr_));
   moodLP_   += (clamp01((0.14f + 0.72f * depth) * (0.6f + 0.7f * mb)) - moodLP_) * gco(0.6f, nf, sr_);
   padBloom_ += ((0.30f + 0.70f * depth) - padBloom_) * gco(0.6f, nf, sr_);
-  reverbWet_ += (clamp01(0.30f + 0.16f * (1.f - depth) + 0.10f * hes + 0.14f * mw) - reverbWet_) * gco(0.6f, nf, sr_);
-  subAmp_   += ((0.07f + 0.09f * (1.f - depth)) - subAmp_) * gco(7.f, nf, sr_);
+  reverbWet_ += (clamp01(0.42f + 0.16f * (1.f - depth) + 0.10f * hes + 0.14f * mw) - reverbWet_) * gco(0.6f, nf, sr_);   // more global reverb
+  subAmp_   += ((0.125f + 0.15f * (1.f - depth)) - subAmp_) * gco(7.f, nf, sr_);   // bass +~5 dB
   shepGain_ += ((0.016f + 0.012f * depth + 0.012f * tension_) - shepGain_) * gco(1.f, nf, sr_);
   shepRateTgt_ = (hes > 0.55f ? -1.f : 1.f) * (1.f / (16.f - 8.f * hes)); shepRate_ += (shepRateTgt_ - shepRate_) * gco(8.f, nf, sr_);
   bool whisperOn = false; for (auto& v : vox_) if (v.on && v.layer == 4) { whisperOn = true; break; }
@@ -406,9 +407,14 @@ void AudioEngine::render(al::AudioIOData& io) {
       for (int k = 0; k < 3; ++k) { float y = growlFmtCoef_[k][0] * g - growlFmtCoef_[k][1] * growlFz_[k][0] - growlFmtCoef_[k][2] * growlFz_[k][1];
         growlFz_[k][1] = dn(growlFz_[k][0]); growlFz_[k][0] = dn(y); fo += fw[k] * y; }
       g = 0.55f * g + 1.6f * fo;
-      subOut = subOut * (1.f - gact) + g * gact * 0.15f;   // dubstep growl level down a further ~15 dB
+      growlOutLp_ = dn(growlOutLp_ + 0.035f * (g - growlOutLp_));   // ~250 Hz one-pole
+      float growlHp = g - growlOutLp_;                              // HIGH-PASS: drop the lows off the bass
+      subOut = subOut * (1.f - gact) + growlHp * gact * 0.047f;     // wobble down a further ~10 dB
     }
     lowMono += subOut * subAmp_ * droneGate_;
+    // pure mono triangle SUB-BASS — a deep foundation (NOT gated by the drone), owns the low end
+    triHz_ += (padRoot * 0.5f - triHz_) * 0.0004f; triPhase_ += triHz_ * isr; if (triPhase_ >= 1.f) triPhase_ -= 1.f;
+    lowMono += (4.f * std::fabs(triPhase_ - 0.5f) - 1.f) * 0.13f;
 
     // MOVING JI drone: per-partial slow tremolo + detune drift + vibrato
     for (int p = 0; p < PADN; ++p) {
@@ -421,23 +427,34 @@ void AudioEngine::render(al::AudioIOData& io) {
       padPhase_[p] += padHz_[p] * vib * isr; if (padPhase_[p] >= 1.f) padPhase_[p] -= std::floor(padPhase_[p]);
       float sg = 0.6f * std::sin(kTAU * padPhase_[p]) + 0.25f * std::sin(kTAU * padPhase_[p] * 2.f);
       padLp_[p] = dn(padLp_[p] + (0.12f + 0.40f * depth) * (sg - padLp_[p]));
+      padHp_[p] = dn(padHp_[p] + 0.025f * (padLp_[p] - padHp_[p]));   // track lows (~180 Hz)
+      float sigHp = padLp_[p] - padHp_[p];                            // HIGH-PASS the drone to clear room for the sub-bass
       float trem = 0.72f + 0.28f * std::sin(kTAU * padTrem_[p]);                    // slow amplitude swell
       float tgtAmp = ((p < 2) ? 0.032f : 0.032f * padBloom_) * trem; padAmp_[p] += (tgtAmp - padAmp_[p]) * 0.002f;   // drone ~-10 dB
-      float a = padAmp_[p] * padLp_[p] * droneGate_;       // drone pauses / drops out by section
+      float a = padAmp_[p] * sigHp * droneGate_;           // drone pauses / drops out by section
       float pan = (p == 0) ? 0.f : (p == 1 ? -0.55f : (p == 2 ? 0.55f : 0.78f)); pan += 0.12f * drift; float pp = 0.5f * (pan + 1.f);
       bedL += a * std::cos(pp * 1.5707963f); bedR += a * std::sin(pp * 1.5707963f); revSend += a * 0.8f;
     }
     beatPhase_ += padRoot * fifthB * isr; if (beatPhase_ >= 1.f) beatPhase_ -= std::floor(beatPhase_);
     { float a = padAmp_[2] * 0.5f * std::sin(kTAU * beatPhase_); bedL += a * 0.3f; bedR -= a * 0.3f; revSend += a * 0.4f; }
 
-    // Shepard + noise bed
+    // Shepard tone as FILTERED WHITE NOISE: octave-spaced resonant band-passes on white noise,
+    // Gaussian-windowed in log-frequency and sweeping forever -> an endless rising NOISE bed
+    // (the moving filter IS the Shepard tone).
     shepPhase_ += shepRate_ * isr; if (shepPhase_ >= 1.f) shepPhase_ -= 1.f; if (shepPhase_ < 0.f) shepPhase_ += 1.f;
-    float sh = 0.f, shn = 0.f;
-    for (int i = 0; i < SHEP; ++i) { float oct = shepPhase_ + float(i) / SHEP; oct -= std::floor(oct); float fi = 32.7f * std::pow(2.f, oct * 6.f), lf = std::log2(fi);
-      float a = std::exp(-0.5f * (lf - std::log2(300.f)) * (lf - std::log2(300.f)) / (1.4f * 1.4f)); shepPh_[i] += fi * isr; if (shepPh_[i] >= 1.f) shepPh_[i] -= std::floor(shepPh_[i]); sh += a * std::sin(kTAU * shepPh_[i]); shn += a; }
-    sh = (shn > 0 ? sh / shn : 0.f) * shepGain_;
-    float nz = frand() * 2.f - 1.f; nzLp_ = dn(nzLp_ + 0.08f * (nz - nzLp_)); nzLp2_ = dn(nzLp2_ + 0.20f * (nzLp_ - nzLp2_));
-    float bedair = sh + nzLp2_ * 0.020f; bedL += bedair * (0.7f + drift); bedR += bedair * (0.7f - drift); revSend += bedair * 1.2f;
+    float shnz = frand() * 2.f - 1.f, sh = 0.f, shn = 0.f;
+    for (int i = 0; i < SHEP; ++i) {
+      float oct = shepPhase_ + float(i) / SHEP; oct -= std::floor(oct);
+      float fi = 32.7f * std::pow(2.f, oct * 6.f), lf = std::log2(fi);
+      float a = std::exp(-0.5f * (lf - std::log2(300.f)) * (lf - std::log2(300.f)) / (1.4f * 1.4f));
+      float ff = 2.f * std::sin(kPI * std::min(fi, float(sr_) / 6.f) / float(sr_)); const float q = 0.05f;
+      shepPh_[i] = dn(shepPh_[i] + ff * shepBp_[i]);            // SVF low-pass state
+      float hp = shnz - shepPh_[i] - q * shepBp_[i];
+      shepBp_[i] = dn(shepBp_[i] + ff * hp);                    // band-pass output = the Shepard band
+      sh += a * shepBp_[i]; shn += a;
+    }
+    float bedair = (shn > 0 ? sh / shn : 0.f) * shepGain_ * 3.4f;   // band-pass is quiet -> lift
+    bedL += bedair * (0.7f + drift); bedR += bedair * (0.7f - drift); revSend += bedair * 1.2f;
 
     // grain cloud (Poisson)
     grainTimer_ -= isr;
@@ -446,7 +463,7 @@ void AudioEngine::render(al::AudioIOData& io) {
         g.K = 2; g.pm[0] = 1; g.pm[1] = 2; g.pa[0] = 1; g.pa[1] = 0.25f + 0.4f * frand(); g.pnorm = 1.f + g.pa[1]; g.amp = (0.022f + 0.04f * act * (0.5f + frand())) * grainGate_; g.life = 0.02f + 0.18f * frand(); g.pan = 0.9f * (2.f * frand() - 1.f); g.grng = rng_ ^ (uint32_t(gi) * 40503u); } }
 
     // pooled voices
-    float ppSendL = 0.f, ppSendR = 0.f;
+    float ppSendL = 0.f, ppSendR = 0.f, sampSend = 0.f;
     for (auto& v : vox_) {
       if (!v.on) continue; float s = tickVoice(v, isr, depth, moodLP_);
       if (v.layer == 4) {                                  // whisper: lead (gated), and into the delay
@@ -461,12 +478,15 @@ void AudioEngine::render(al::AudioIOData& io) {
         float cL = std::cos(pp * 1.5707963f), cR = std::sin(pp * 1.5707963f);
         bedL += s * cL; bedR += s * cR; revSend += s * 0.5f;
         if (v.layer == 2) { ppSendL += 0.55f * s * cL; ppSendR += 0.55f * s * cR; }   // grains -> delay
+        if (v.smp) sampSend += s;                                                     // CC0 samples -> short reverb
       }
     }
     // ping-pong delay (grains + whispers bounce L<->R)
     { float dL = ppL_[ppPos_], dR = ppR_[ppPos_];
       ppL_[ppPos_] = dn(ppSendL + dR * 0.42f); ppR_[ppPos_] = dn(ppSendR + dL * 0.42f); ppPos_ = (ppPos_ + 1) % ppN_;
       bedL += dL * 0.32f; bedR += dR * 0.32f; }
+    // short MONO reverb to blend the CC0 samples (pluck/bell/trace/organ)
+    { float sw1 = 0.f, sw2 = 0.f; sampRev_(sampSend * 0.5f, sw1, sw2, 0.5f); float sw = 0.5f * (sw1 + sw2); bedL += sw * 0.3f; bedR += sw * 0.3f; }
 
     float w1 = 0.f, w2 = 0.f; reverb_(revSend * 0.5f, w1, w2, 0.6f);
     float L = duckGain_ * bedL + leadL + lowDuck_ * lowMono + reverbWet_ * w1;
