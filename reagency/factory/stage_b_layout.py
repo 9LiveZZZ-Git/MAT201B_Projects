@@ -32,7 +32,7 @@ def umap_3d(E, seed):
     try:
         import umap
         n = min(30, max(5, E.shape[0] - 1))
-        reducer = umap.UMAP(n_components=3, n_neighbors=n, min_dist=0.0,
+        reducer = umap.UMAP(n_components=3, n_neighbors=n, min_dist=0.3,
                             metric="cosine", random_state=seed)
         return reducer.fit_transform(E).astype(np.float32)
     except Exception as e:

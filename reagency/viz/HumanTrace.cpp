@@ -133,7 +133,7 @@ void HumanTrace::draw(Graphics& g, const Vec3f& nodePos, const Vec3f& camRight,
 
   // --- the photo, camera-facing, at its node ---
   if (photoA > 0.003f) {
-    const float h = 0.8f;     // ~1.6-unit quad
+    const float h = 1.2f;     // ~2.4-unit quad (readable from across the cloud)
     const Vec3f r = camRight * h, u = camUp * h;
     const Vec3f BL = nodePos - r - u, BR = nodePos + r - u,
                 TL = nodePos - r + u, TR = nodePos + r + u;
@@ -165,7 +165,7 @@ void HumanTrace::draw(Graphics& g, const Vec3f& nodePos, const Vec3f& camRight,
   if (gp > 0.003f) {
     Vec3f avg = (slot < int(slotAvg_.size())) ? slotAvg_[slot] : Vec3f(1.f, 0.85f, 0.6f);
     avg *= 1.5f;   // grains are additive; brighten
-    const int NG = 220; const float SPREAD = 5.5f;
+    const int NG = 300; const float SPREAD = 6.5f;
     grains_.reset();
     grains_.primitive(Mesh::POINTS);
     for (int i = 0; i < NG; ++i) {
@@ -184,8 +184,8 @@ void HumanTrace::draw(Graphics& g, const Vec3f& nodePos, const Vec3f& camRight,
     g.blending(true);
     g.blendAdd();
     g.shader(grainShader_);
-    g.shader().uniform("uPointSize", 6.f);
-    g.pointSize(6.f);
+    g.shader().uniform("uPointSize", 8.f);
+    g.pointSize(8.f);
     g.draw(grains_);
     g.blendTrans();
     g.depthTesting(true);

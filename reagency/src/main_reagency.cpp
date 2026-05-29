@@ -19,6 +19,7 @@
 #include <cmath>
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace al;
 using namespace wosw;
@@ -32,7 +33,9 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   Conductor     conductor;
   VesselSplats  vessel;
   HumanTrace    trace;
-  int           lastCurNode_ = -1;
+  std::vector<int> heroNodes_;                // corpus image nodes that have an atlas thumbnail
+  int           heroCursor_ = 0;
+  float         traceTimer_ = 0.f;
   static constexpr float TRACE_LIFE = 4.5f;   // seconds a surfaced photo lives
   std::string   assetDir = "assets";
 
@@ -44,6 +47,8 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     conductor.init(pos, webs.adjacency(), 7);
     vessel.init(assetDir);
     trace.init(assetDir);
+    for (int i = 0; i < field.count(); ++i)            // traceable corpus photos
+      if (field.typeOf(i) == 0 && field.atlasOf(i) >= 0) heroNodes_.push_back(i);
     nav().pos().set(0.0, 0.0, 16.0);
     nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
     // Renderers must not take local nav input — the primary's pose is authoritative.
@@ -67,28 +72,25 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       s.focusPos[0] = focus.x; s.focusPos[1] = focus.y; s.focusPos[2] = focus.z;
       s.vesselKf   = float(conductor.visits()) + conductor.progress();
 
-      // Human trace ring: age + expire surfaced photos; surface a new one when the machine
-      // settles on a hero image (multiple can be alive at once, at their node positions).
+      // Human trace ring: age + expire; surface a NEW photo on a steady cadence (round-robin
+      // through the corpus's hero images) so the dissolve is ALWAYS on screen — not only when
+      // the wander happens to land on one (which was far too rare to see).
       for (int i = 0; i < WoSWState::N_TRACE; ++i)
         if (s.traceNode[i] >= 0) {
           s.traceAge[i] += float(dt);
           if (s.traceAge[i] > TRACE_LIFE) s.traceNode[i] = -1;
         }
-      const int cn = conductor.curNode();
-      if (cn != lastCurNode_) {                  // arrived at a new node
-        lastCurNode_ = cn;
-        if (cn >= 0 && field.typeOf(cn) == 0 && field.atlasOf(cn) >= 0) {
-          bool present = false; int freeSlot = -1, oldest = 0;
-          for (int i = 0; i < WoSWState::N_TRACE; ++i) {
-            if (s.traceNode[i] == cn) present = true;
-            if (s.traceNode[i] < 0 && freeSlot < 0) freeSlot = i;
-            if (s.traceAge[i] > s.traceAge[oldest]) oldest = i;
-          }
-          if (!present) {
-            const int slot = (freeSlot >= 0) ? freeSlot : oldest;
-            s.traceNode[slot] = cn; s.traceAge[slot] = 0.f;
-          }
+      traceTimer_ += float(dt);
+      if (!heroNodes_.empty() && traceTimer_ > 2.2f) {
+        traceTimer_ = 0.f;
+        const int node = heroNodes_[(heroCursor_++) % int(heroNodes_.size())];
+        int freeSlot = -1, oldest = 0;
+        for (int i = 0; i < WoSWState::N_TRACE; ++i) {
+          if (s.traceNode[i] < 0 && freeSlot < 0) freeSlot = i;
+          if (s.traceAge[i] > s.traceAge[oldest]) oldest = i;
         }
+        const int slot = (freeSlot >= 0) ? freeSlot : oldest;
+        s.traceNode[slot] = node; s.traceAge[slot] = 0.f;
       }
 
       // Camera. A DENSE corpus (the real ~10k) lets us sit INSIDE the cloud and be enveloped;
@@ -103,9 +105,9 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
         const Vec3d look = eye + Vec3d(std::sin(yaw), 0.12 * std::sin(t * 0.02), std::cos(yaw)) * 6.0;
         nav().faceToward(look, Vec3d(0, 1, 0));
       } else {
-        // sparse preview: close orbit, looking in, so the whole cloud reads
-        const double a = t * 0.05, R = 9.0;
-        nav().pos().set(R * std::sin(a), 1.5 * std::sin(a * 0.5), R * std::cos(a));
+        // sparse preview: orbit at a distance, looking in, so the cloud reads with room around it
+        const double a = t * 0.05, R = 13.0;
+        nav().pos().set(R * std::sin(a), 2.0 * std::sin(a * 0.5), R * std::cos(a));
         nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
       }
 
