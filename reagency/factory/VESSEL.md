@@ -2,7 +2,7 @@
 
 The outer "vessel" is the machine's **image-to-3D hallucination of each cluster's
 representative corpus photo**, melted between clusters at runtime. Generation is OFFLINE
-(on the 4060 Ti); the allolib runtime only loads a compact binary and morphs it — no
+(on Google Colab Pro+, A100 ~40 GB); the allolib runtime only loads a compact binary — no
 runtime ML. This doc is the verified runbook (from the vessel-design workflow).
 
 ## The one decision that makes or breaks it: correspondence
@@ -21,19 +21,25 @@ means "the same place" in every keyframe:
 
 `G` (Gaussians per keyframe) **must be identical across all keyframes** — enforced by Stage D.
 
-## Step 1 — generate one `.ply` per cluster (on the 4060 Ti)
+## Step 1 — generate one `.ply` per cluster (Google Colab Pro+, A100 ~40 GB)
 
-You only need **one hero per cluster** (clustering yields ~6–24 clusters, not 704). After
-`make_assets.sh`, `stage_b` writes `work/cluster_reps.json` listing the representative corpus
-image per cluster — feed those to the generator.
+Generation now runs on **Colab Pro+ (A100, ~40 GB)** — VRAM is no longer a constraint, so we run
+the best models at full quality. (OFFLINE only; the runtime/dome budget is unchanged.) You only
+need **one hero per cluster** (~6–24, not 704); `stage_b` writes `work/cluster_reps.json` with the
+representative corpus image per cluster.
 
-### Primary: LGM (best quality; fits the 16 GB 4060 Ti)
-Repo: https://github.com/3DTopia/LGM (ECCV 2024). Feed-forward, ~10–20 s/image on a 4060 Ti.
+Get the corpus onto Colab (images are gitignored) — clone, then re-fetch from the ledger:
+```bash
+!git clone -b world-of-shadow-work https://github.com/9LiveZZZ-Git/MAT201B_Projects.git
+%cd MAT201B_Projects/reagency/factory && !python3 download_from_csv.py   # re-fetch corpus images
+```
+
+### Recommended: LGM (simple, fast, reliable) — trivial on the A100
+Repo: https://github.com/3DTopia/LGM (ECCV 2024). Feed-forward, a few seconds/image on an A100.
 Emits 14-channel 3DGS `.ply` (pos, f_dc×3, opacity, scale×3, rot×4 — no normals, no f_rest).
 ```bash
-# env (cu118 supports the Ada sm_89 4060 Ti cleanly)
-pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu118
-pip install -U xformers --index-url https://download.pytorch.org/whl/cu118
+# Colab Pro+ A100: torch + CUDA are preinstalled; just add the extras
+pip install -U xformers
 git clone --recursive https://github.com/ashawkey/diff-gaussian-rasterization && pip install ./diff-gaussian-rasterization
 pip install git+https://github.com/NVlabs/nvdiffrast
 git clone https://github.com/3DTopia/LGM && cd LGM && pip install -r requirements.txt
@@ -42,13 +48,13 @@ python infer.py big --resume pretrained/model_fp16.safetensors \
   --workspace .../reagency/factory/work/vessels \
   --test_path <a cluster-rep image OR a dir of them>     # LGM rembg's the background itself
 ```
-**8 GB 4060 Ti:** LGM's ~10 GB peak (ImageDream + U-Net resident) will OOM. Either offload
-between stages (`del pipe; torch.cuda.empty_cache()` after the 4-view diffusion, then load the
-U-Net), rent a 24 GB cloud GPU for the one-time batch, or use the fallback below.
-
-### Fallback: DreamGaussian (confirmed on 8 GB)
-Repo: https://github.com/dreamgaussian/dreamgaussian (~2 min/image on an 8 GB 3070). Needs an
-RGBA cutout (`rembg`); produces a 3DGS `.ply` you pass to Stage D the same way.
+### Top quality (now that VRAM allows): TRELLIS
+Repo: https://github.com/microsoft/TRELLIS — Microsoft's image-to-3D structured-latent model,
+the best Gaussian quality but heavier (~16–24 GB; comfortable on the 40 GB A100). Follow its
+README for the CUDA-extension-heavy install, run its image-to-3D pipeline, and export the 3DGS
+`.ply`. Use it for hero vessels you want cleaner; LGM for fast breadth — Stage D auto-detects the
+`.ply` schema either way. (The old 8 GB fallbacks — DreamGaussian / TriplaneGaussian — are no
+longer needed with the A100.)
 
 ### Glitch aesthetic = free
 Single-image 3D models hallucinate the unseen back (Janus artifacts, floaters, impossible
