@@ -4,6 +4,7 @@ bin/
 
 # Offline factory intermediates (regenerate via factory/)
 factory/work/
+factory/*.zip
 
 # NOTE: assets/ (points.bin, edges.bin, labels.txt, manifest.json, atlas_0.png) ARE
 # committed on purpose — they are a few MB and this is how they reach the Mac preview
