@@ -8,6 +8,30 @@ namespace wosw {
 
 using namespace al;
 
+// Custom line shader (allolib-native ShaderProgram, same path as ParticleField) so the
+// whole web can be faded by a single uniform for the depth crossfade. Per-vertex color
+// (location 1) is preserved; uIntensity scales the additive alpha.
+static const char* kVert = R"GLSL(
+#version 330
+uniform mat4 al_ModelViewMatrix;
+uniform mat4 al_ProjectionMatrix;
+layout (location = 0) in vec3 vertexPosition;
+layout (location = 1) in vec4 vertexColor;
+out vec4 vcol;
+void main() {
+  vcol = vertexColor;
+  gl_Position = al_ProjectionMatrix * al_ModelViewMatrix * vec4(vertexPosition, 1.0);
+}
+)GLSL";
+
+static const char* kFrag = R"GLSL(
+#version 330
+in vec4 vcol;
+out vec4 fragColor;
+uniform float uIntensity;
+void main() { fragColor = vec4(vcol.rgb, vcol.a * uIntensity); }   // additive blend in draw()
+)GLSL";
+
 // Low per-edge alpha: with additive blending, dense regions of the web brighten on
 // their own as edges overlap (no per-edge opacity logic needed).
 static constexpr float kEdgeAlpha = 0.22f;     // was 0.06 — lines were invisible
@@ -103,16 +127,19 @@ bool WebRenderer::init(const std::string& assetDir,
     std::fprintf(stderr, "[wosw] edges.bin not found — 3D k-NN fallback (%d edges)\n", n_edges_);
   }
   mesh_.update();
+  shader_ok_ = shader_.compile(kVert, kFrag);
+  if (!shader_ok_) std::fprintf(stderr, "[wosw] ERROR: web shader failed to compile\n");
   return true;
 }
 
-void WebRenderer::draw(Graphics& g) {
-  if (n_edges_ == 0) return;
+void WebRenderer::draw(Graphics& g, float bright) {
+  if (n_edges_ == 0 || !shader_ok_ || bright <= 0.f) return;
   g.depthTesting(false);
   g.blending(true);
   g.blendAdd();
   g.lineWidth(1.f);
-  g.meshColor();          // per-vertex colors via allolib's built-in shader
+  g.shader(shader_);
+  g.shader().uniform("uIntensity", bright);
   g.draw(mesh_);
   g.blendTrans();
   g.depthTesting(true);

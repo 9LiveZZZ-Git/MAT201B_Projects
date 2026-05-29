@@ -7,6 +7,7 @@
 // Rendered as many LOW-ALPHA additive lines (al::Mesh::LINES) — the web structure
 // emerges from accumulated overlap rather than per-edge logic (cutterkom). Built once.
 #include "al/graphics/al_Graphics.hpp"
+#include "al/graphics/al_Shader.hpp"
 #include "al/graphics/al_VAOMesh.hpp"
 #include "al/math/al_Vec.hpp"
 #include <string>
@@ -22,7 +23,9 @@ struct WebRenderer {
             const std::vector<al::Vec3f>& positions,
             const std::vector<al::Vec3f>& colors);
 
-  void draw(al::Graphics& g);
+  // bright scales the additive line alpha (webs fade toward the vessel end of the
+  // depth crossfade, where the galaxy structure recedes).
+  void draw(al::Graphics& g, float bright = 1.f);
 
   int  edgeCount()  const { return n_edges_; }
   bool loadedReal() const { return loaded_real_; }
@@ -31,7 +34,9 @@ struct WebRenderer {
   const std::vector<std::vector<std::pair<int, float>>>& adjacency() const { return adj_; }
 
  private:
-  al::VAOMesh mesh_;
+  al::VAOMesh       mesh_;
+  al::ShaderProgram shader_;
+  bool              shader_ok_ = false;
   int  n_edges_     = 0;
   bool loaded_real_ = false;
   std::vector<std::vector<std::pair<int, float>>> adj_;   // graph for the Conductor

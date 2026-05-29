@@ -153,7 +153,7 @@ bool ParticleField::init(const std::string& assetDir) {
   return shader_ok_;
 }
 
-void ParticleField::draw(Graphics& g, float pointScale) {
+void ParticleField::draw(Graphics& g, float pointScale, float bright) {
   if (!shader_ok_) return;
   g.depthTesting(false);          // additive galaxy: order-independent, no depth write
   g.blending(true);
@@ -163,7 +163,7 @@ void ParticleField::draw(Graphics& g, float pointScale) {
   g.shader().uniform("uCore",      core_sigma_);
   g.shader().uniform("uHalo",      halo_sigma_);
   g.shader().uniform("uHaloStr",   halo_strength_);
-  g.shader().uniform("uIntensity", intensity_);
+  g.shader().uniform("uIntensity", intensity_ * bright);
   g.pointSize(point_size_ * pointScale);  // fallback for drivers ignoring gl_PointSize
   g.draw(mesh_);
   g.blendTrans();

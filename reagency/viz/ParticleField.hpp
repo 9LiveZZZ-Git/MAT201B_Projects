@@ -24,7 +24,9 @@ struct ParticleField {
   // to a procedural galaxy if none found). Returns false only if the shader fails.
   bool init(const std::string& assetDir);
 
-  void draw(al::Graphics& g, float pointScale = 1.f);
+  // pointScale scales sprite size; bright scales overall intensity (the galaxy
+  // dims toward the vessel end of the depth crossfade).
+  void draw(al::Graphics& g, float pointScale = 1.f, float bright = 1.f);
 
   int  count()      const { return n_; }
   bool loadedReal() const { return loaded_real_; }

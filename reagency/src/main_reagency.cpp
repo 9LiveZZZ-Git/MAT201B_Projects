@@ -40,6 +40,12 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   float         traceTimer_ = 0.f;
   static constexpr float TRACE_LIFE  = 9.0f;  // seconds a surfaced photo lives (lingers)
   static constexpr float TRACE_EVERY = 6.0f;  // cadence between new photos (calm, ~rotation-paced)
+  // Depth crossfade: a slow autonomous "tide" between the galaxy (home) and a descent to the
+  // core vessel. depthPhase_ advances in time but SLOWS when the machine hesitates, so the
+  // descent breathes with the mind. Dwells longer in the galaxy; dips fully to the vessel once
+  // per period. depth: 1 = galaxy out among the points, 0 = sunk into the core vessel shell.
+  float         depthPhase_ = 0.f;
+  static constexpr float DEPTH_PERIOD = 80.0f;  // seconds for a full galaxy->vessel->galaxy tide
   std::string   assetDir = "assets";
 
   void onCreate() override {
@@ -97,20 +103,31 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
         s.traceNode[slot] = node; s.traceAge[slot] = 0.f;
       }
 
+      // Depth tide: advance the phase, slowed by hesitation; map to depth that dwells near the
+      // galaxy (1) and dips to the vessel (0) once per period (pow<1 biases time toward 1).
+      depthPhase_ += float(dt) * (1.f - 0.4f * s.hesitation) / DEPTH_PERIOD;
+      const float u   = depthPhase_ * 6.2831853f;
+      const float raw = 0.5f - 0.5f * std::cos(u);          // 0..1, starts at vessel
+      s.depth = std::pow(raw, 0.6f);                          // dwell longer in the galaxy
+
       // Camera. A DENSE corpus (the real ~10k) lets us sit INSIDE the cloud and be enveloped;
       // a small preview corpus is too sparse for inside-out (you'd see mostly void), so we
-      // orbit just outside and look in. Auto-switches once the corpus is dense.
+      // orbit just outside and look in. Auto-switches once the corpus is dense. The depth tide
+      // pulls the eye toward the core vessel as it descends (depth->0) and back out (depth->1).
       const double t = s.simTime;
+      const double d = s.depth;
       if (field.count() >= 3000) {
-        // immersive: inside the cloud, gentle drift + slow yaw (omni fills the 360 in the dome)
-        const Vec3d eye(1.8 * std::sin(t * 0.045), 0.9 * std::sin(t * 0.031), 1.8 * std::cos(t * 0.045));
+        // immersive: inside the cloud; radius shrinks toward the core as we descend
+        const double k = 0.30 + 0.95 * d;
+        const Vec3d eye(1.8 * k * std::sin(t * 0.045), 0.9 * k * std::sin(t * 0.031),
+                        1.8 * k * std::cos(t * 0.045));
         nav().pos().set(eye.x, eye.y, eye.z);
         const double yaw = t * 0.05;
         const Vec3d look = eye + Vec3d(std::sin(yaw), 0.12 * std::sin(t * 0.02), std::cos(yaw)) * 6.0;
         nav().faceToward(look, Vec3d(0, 1, 0));
       } else {
-        // sparse preview: orbit at a distance, looking in, so the cloud reads with room around it
-        const double a = t * 0.05, R = 13.0;
+        // sparse preview: orbit looking in; radius descends toward the core vessel with depth
+        const double a = t * 0.05, R = 6.0 + 9.0 * d;
         nav().pos().set(R * std::sin(a), 2.0 * std::sin(a * 0.5), R * std::cos(a));
         nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
       }
@@ -132,15 +149,27 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   }
 
   void onDraw(Graphics& g) override {
-    g.clear(0.03f, 0.03f, 0.05f);     // subtly-lifted void (reads better in the dome)
-    webs.draw(g);                     // similarity webs under the points
-    field.draw(g, 1.f);
+    auto& s = state();
+    // Depth crossfade weights (synced depth, so identical on every dome node). dd = smoothstep,
+    // vd = vessel-ness. As we descend (depth->0): galaxy dims, webs recede, the vessel cocoon
+    // brightens and swells around the core; rising back out reverses it.
+    const float depth = s.depth;
+    const float dd = depth * depth * (3.f - 2.f * depth);
+    const float vd = 1.f - dd;
+    const float galBright = 0.45f + 0.55f * dd;
+    const float webBright = 0.20f + 0.80f * dd;
+    const float vesAlpha  = 0.10f + 0.70f * vd;
+    const float vesScale  = 1.3f + 1.7f * vd;
 
-    // The "vessel" at the core — faint central haze (the missing splat middle; comes from Colab).
-    vessel.draw(g, Vec3f(0, 0, 0), 1.3f, 0.3f);
+    g.clear(0.03f, 0.03f, 0.05f);     // subtly-lifted void (reads better in the dome)
+    webs.draw(g, webBright);          // similarity webs under the points
+    field.draw(g, 1.f, galBright);
+
+    // The "vessel" at the core — swells into an enveloping shell as we descend, faint central
+    // haze out in the galaxy (the missing splat middle comes from Colab).
+    vessel.draw(g, Vec3f(0, 0, 0), vesScale, vesAlpha);
 
     // Camera-facing axes (for billboards), from the synced pose.
-    auto& s = state();
     Quatd q(s.navQuat[3], s.navQuat[0], s.navQuat[1], s.navQuat[2]);
     Vec3d rgt = q.rotate(Vec3d(1, 0, 0));
     Vec3d upv = q.rotate(Vec3d(0, 1, 0));
