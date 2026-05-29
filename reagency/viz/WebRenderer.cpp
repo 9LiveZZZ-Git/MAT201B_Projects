@@ -10,13 +10,21 @@ using namespace al;
 
 // Low per-edge alpha: with additive blending, dense regions of the web brighten on
 // their own as edges overlap (no per-edge opacity logic needed).
-static constexpr float kEdgeAlpha = 0.06f;
+static constexpr float kEdgeAlpha = 0.22f;     // was 0.06 — lines were invisible
+
+// brighten an endpoint color so the (otherwise dim, cluster-colored) lines read clearly
+static inline al::Vec3f edgeColor(const al::Vec3f& c) {
+  return al::Vec3f(std::min(1.f, c.x * 1.5f + 0.12f),
+                   std::min(1.f, c.y * 1.5f + 0.12f),
+                   std::min(1.f, c.z * 1.5f + 0.12f));
+}
 
 void WebRenderer::addEdge(const Vec3f& a, const Vec3f& b,
                           const Vec3f& ca, const Vec3f& cb, float w) {
-  float al = kEdgeAlpha * (0.4f + 0.6f * w);   // stronger similarity -> slightly brighter
-  mesh_.vertex(a.x, a.y, a.z); mesh_.color(ca.x, ca.y, ca.z, al);
-  mesh_.vertex(b.x, b.y, b.z); mesh_.color(cb.x, cb.y, cb.z, al);
+  float al = kEdgeAlpha * (0.5f + 0.5f * w);    // stronger similarity -> brighter
+  Vec3f bca = edgeColor(ca), bcb = edgeColor(cb);
+  mesh_.vertex(a.x, a.y, a.z); mesh_.color(bca.x, bca.y, bca.z, al);
+  mesh_.vertex(b.x, b.y, b.z); mesh_.color(bcb.x, bcb.y, bcb.z, al);
 }
 
 // edges.bin "WSWE": [magic, int32 ver=1, int32 E] then E*(uint32 i, uint32 j, float w)

@@ -63,9 +63,9 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       s.focusPos[0] = focus.x; s.focusPos[1] = focus.y; s.focusPos[2] = focus.z;
       s.vesselKf   = float(conductor.visits()) + conductor.progress();
 
-      // Camera: calm slow orbit around the galaxy center (like M0).
-      const float t = s.simTime * 0.05f, R = 16.f;
-      nav().pos().set(R * std::sin(t), 2.0 * std::sin(t * 0.5f), R * std::cos(t));
+      // Camera: calm slow orbit, closer in so the galaxy fills the frame.
+      const float t = s.simTime * 0.05f, R = 11.f;
+      nav().pos().set(R * std::sin(t), 1.0 * std::sin(t * 0.5f), R * std::cos(t));
       nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
 
       // pack pose for renderers
@@ -91,7 +91,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
 
     // The outer "vessel": the machine's morphing image-to-3D dream-body, at the galaxy
     // center. The camera calmly orbits it; depth-crossfade with the galaxy comes later.
-    vessel.draw(g, Vec3f(0, 0, 0), 3.0f, 0.85f);
+    vessel.draw(g, Vec3f(0, 0, 0), 1.6f, 0.5f);
   }
 
   void onSound(AudioIOData& io) override {
