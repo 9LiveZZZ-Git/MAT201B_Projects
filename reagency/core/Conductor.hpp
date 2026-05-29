@@ -27,6 +27,7 @@ struct Conductor {
   int   nextNode()   const { return next_; }
   float hesitation() const { return hesitation_; }
   float progress()   const { return t_; }
+  long  visits()     const { return visits_; }   // nodes arrived at (drives vessel morph)
 
  private:
   std::vector<al::Vec3f>                            pos_;
@@ -34,6 +35,7 @@ struct Conductor {
   std::vector<float>                               visited_;   // recency, for novelty bias
   std::mt19937 rng_{1};
   int   cur_ = 0, next_ = 0;
+  long  visits_ = 0;
   float t_ = 0.f;            // 0..1 progress from cur_ to next_
   float speed_ = 0.35f;      // base traversal speed
   float hesitation_ = 0.f;

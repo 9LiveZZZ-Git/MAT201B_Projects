@@ -25,6 +25,7 @@ add_executable(reagency
     src/main_reagency.cpp
     viz/ParticleField.cpp
     viz/WebRenderer.cpp
+    viz/VesselSplats.cpp
     core/Conductor.cpp)
 target_link_libraries(reagency PRIVATE al Threads::Threads)
 target_include_directories(reagency PRIVATE ${REAGENCY_INCLUDE_DIRS})

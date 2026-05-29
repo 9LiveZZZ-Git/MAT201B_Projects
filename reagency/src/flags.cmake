@@ -21,6 +21,7 @@ set(app_include_dirs
 set(_reagency_lib_srcs
     "${REAGENCY_ROOT}/viz/ParticleField.cpp"
     "${REAGENCY_ROOT}/viz/WebRenderer.cpp"
+    "${REAGENCY_ROOT}/viz/VesselSplats.cpp"
     "${REAGENCY_ROOT}/core/Conductor.cpp"
 )
 

@@ -58,6 +58,7 @@ void Conductor::step(float dt) {
   t_ += v * dt;
   if (t_ >= 1.f) {
     t_ = 0.f;
+    ++visits_;
     if (next_ >= 0 && next_ < int(visited_.size())) visited_[next_] += 1.f;
     for (auto& vv : visited_) vv *= 0.995f;              // slow decay so old nodes refresh
     cur_ = next_;

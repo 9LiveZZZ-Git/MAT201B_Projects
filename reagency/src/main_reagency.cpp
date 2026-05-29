@@ -9,12 +9,12 @@
 #include "al/app/al_DistributedApp.hpp"
 #include "al/math/al_Quat.hpp"
 #include "al/math/al_Vec.hpp"
-#include "al/graphics/al_Shapes.hpp"
 
 #include "core/WoSWState.hpp"
 #include "core/Conductor.hpp"
 #include "viz/ParticleField.hpp"
 #include "viz/WebRenderer.hpp"
+#include "viz/VesselSplats.hpp"
 
 #include <cmath>
 #include <memory>
@@ -30,8 +30,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   ParticleField field;
   WebRenderer   webs;
   Conductor     conductor;
-  al::Mesh      marker_;              // glowing orb at the machine's current fixation
-  al::Vec3f     camFocus_{0, 0, 0};   // smoothed camera target (hides graph jumps)
+  VesselSplats  vessel;
   std::string   assetDir = "assets";
 
   void onCreate() override {
@@ -40,8 +39,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     auto col = field.colors();
     webs.init(assetDir, pos, col);
     conductor.init(pos, webs.adjacency(), 7);
-    addSphere(marker_, 1.0, 16, 16);
-    camFocus_ = conductor.focusPos();
+    vessel.init(assetDir);
     nav().pos().set(0.0, 0.0, 16.0);
     nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
     // Renderers must not take local nav input — the primary's pose is authoritative.
@@ -54,24 +52,21 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       s.frame++;
       s.simTime += float(dt);
 
-      // The autonomous mind walks its own k-NN graph live; we render its real choices.
+      // The mind still walks its own k-NN graph (it drives the vessel morph + hesitation
+      // + future audio), but it no longer moves the camera — that read as distracting
+      // zoom. The wander shows in the morphing vessel, not in camera motion.
       conductor.step(float(dt));
       s.curNode    = conductor.curNode();
       s.nextNode   = conductor.nextNode();
       s.hesitation = conductor.hesitation();
       const Vec3f focus = conductor.focusPos();
       s.focusPos[0] = focus.x; s.focusPos[1] = focus.y; s.focusPos[2] = focus.z;
+      s.vesselKf   = float(conductor.visits()) + conductor.progress();
 
-      // Camera follows the fixation: smoothed focus + a slow orbit, wobbling when the
-      // machine hesitates (entropy high). Smoothing the focus hides graph jumps.
-      camFocus_ += (focus - camFocus_) * 0.04f;
-      const float t = s.simTime, R = 7.5f;
-      Vec3d eye(camFocus_.x + R * std::sin(t * 0.13f),
-                camFocus_.y + 2.2,
-                camFocus_.z + R * std::cos(t * 0.13f));
-      eye += Vec3d(std::sin(t * 7.0f), std::cos(t * 6.3f), std::sin(t * 5.1f)) * (0.5 * s.hesitation);
-      nav().pos().set(eye.x, eye.y, eye.z);
-      nav().faceToward(Vec3d(camFocus_.x, camFocus_.y, camFocus_.z), Vec3d(0, 1, 0));
+      // Camera: calm slow orbit around the galaxy center (like M0).
+      const float t = s.simTime * 0.05f, R = 16.f;
+      nav().pos().set(R * std::sin(t), 2.0 * std::sin(t * 0.5f), R * std::cos(t));
+      nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
 
       // pack pose for renderers
       const auto p = nav().pos();
@@ -84,6 +79,9 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       nav().pos().set(s.navPos[0], s.navPos[1], s.navPos[2]);
       nav().quat() = Quatd(s.navQuat[3], s.navQuat[0], s.navQuat[1], s.navQuat[2]);
     }
+
+    // The vessel morphs on every node from the synced keyframe position.
+    vessel.update(s.vesselKf, s.simTime);
   }
 
   void onDraw(Graphics& g) override {
@@ -91,20 +89,9 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     webs.draw(g);                     // similarity webs under the points
     field.draw(g, 1.f);
 
-    // The machine's current "attention": a warm glowing orb at the fixation, pulsing
-    // bigger when it hesitates. Position is synced state, so it matches on every node.
-    auto& s = state();
-    g.depthTesting(false);
-    g.blending(true);
-    g.blendAdd();
-    g.pushMatrix();
-    g.translate(s.focusPos[0], s.focusPos[1], s.focusPos[2]);
-    g.scale(0.35f + 0.12f * std::sin(s.simTime * 4.f) + 0.5f * s.hesitation);
-    g.color(1.0f, 0.85f, 0.6f, 1.f);
-    g.draw(marker_);
-    g.popMatrix();
-    g.blendTrans();
-    g.depthTesting(true);
+    // The outer "vessel": the machine's morphing image-to-3D dream-body, at the galaxy
+    // center. The camera calmly orbits it; depth-crossfade with the galaxy comes later.
+    vessel.draw(g, Vec3f(0, 0, 0), 3.0f, 0.85f);
   }
 
   void onSound(AudioIOData& io) override {
