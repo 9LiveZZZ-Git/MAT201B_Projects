@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.abspath(os.path.join(HERE, "..", "assets"))
 COLS, CW, CH = 8, 256, 64
-N_GALAXY = 36   # how many words to float in the galaxy (subtle)
+N_GALAXY = 14   # how many words to float in the galaxy (subtle, sparse)
 
 
 def _font(size):

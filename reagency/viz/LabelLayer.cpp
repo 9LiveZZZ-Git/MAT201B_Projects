@@ -53,15 +53,30 @@ void LabelLayer::loadText(const std::string& assetDir) {
   for (const auto& b : bases) {
     FILE* f = std::fopen((b + "/labels.txt").c_str(), "r");
     if (!f) continue;
-    char line[1024]; float x, y, z; int slot;
+    char line[1024]; float x, y, z; int slot, off = 0;
     while (std::fgets(line, sizeof(line), f))
-      if (std::sscanf(line, "%f %f %f %d", &x, &y, &z, &slot) == 4)
+      if (std::sscanf(line, "%f %f %f %d %n", &x, &y, &z, &slot, &off) >= 4) {
         clusters_.push_back({Vec3f(x, y, z), slot});
+        std::string w(line + off);                       // the rest of the line is the word
+        while (!w.empty() && (w.back() == '\n' || w.back() == '\r' || w.back() == ' ')) w.pop_back();
+        if (!w.empty()) slotWord_[slot] = w;
+      }
     std::fclose(f);
     if (FILE* c = std::fopen((b + "/classify.txt").c_str(), "r")) {
       int node, sl;
       while (std::fscanf(c, "%d %d", &node, &sl) == 2) nodeSlot_[node] = sl;
       std::fclose(c);
+    }
+    // slot -> word for EVERY slot (image labels too, not just clusters), if present
+    if (FILE* w = std::fopen((b + "/label_words.txt").c_str(), "r")) {
+      char line2[1024]; int sl, o2 = 0;
+      while (std::fgets(line2, sizeof(line2), w))
+        if (std::sscanf(line2, "%d %n", &sl, &o2) >= 1) {
+          std::string s(line2 + o2);
+          while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) s.pop_back();
+          if (!s.empty()) slotWord_[sl] = s;
+        }
+      std::fclose(w);
     }
     break;
   }
@@ -112,7 +127,7 @@ void LabelLayer::drawClusters(Graphics& g, const Vec3f& camR, const Vec3f& camU,
   if (!ready() || alpha <= 0.f) return;
   g.depthTesting(false); g.blending(true); g.blendTrans();
   for (const auto& c : clusters_)
-    drawCell(g, shader_, tex_, mesh_, c.pos, camR, camU, c.slot, alpha, 0.6f,
+    drawCell(g, shader_, tex_, mesh_, c.pos, camR, camU, c.slot, alpha, 0.22f,   // a lot smaller
              cols_, cw_, ch_, atlasW_, atlasH_);
   g.depthTesting(true);
 }
