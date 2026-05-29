@@ -203,6 +203,22 @@ def main():
             words = [meta[i]["label"] for i in members if meta[i]["type"] == "word"]
             label = words[0] if words else (meta[members[0]]["label"] if members else "cluster %d" % c)
             f.write("%d\t%.3f\t%.3f\t%.3f\t%s\n" % (c, ctr[0], ctr[1], ctr[2], label))
+    # cluster representatives (one image per cluster) -> Stage D vessel generator inputs.
+    reps = {}
+    for c in sorted(set(int(x) for x in cluster_id if x >= 0)):
+        best_i, best_d = -1, -1.0
+        for i in range(N):
+            if int(cluster_id[i]) != c or meta[i]["type"] != "image":
+                continue
+            if density[i] > best_d:
+                best_d, best_i = float(density[i]), i
+        if best_i >= 0:
+            reps[str(c)] = {"file": meta[best_i]["file"],
+                            "label": meta[best_i].get("label", ""),
+                            "source_url": meta[best_i].get("source_url", "")}
+    json.dump(reps, open(os.path.join(a.work, "cluster_reps.json"), "w"), indent=2)
+    print("[stage_b] %d cluster representatives -> work/cluster_reps.json" % len(reps))
+
     # manifest
     json.dump({
         "title": "World of Shadow Work", "seed": a.seed,
