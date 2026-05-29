@@ -27,7 +27,7 @@ struct RavenBrain {
     // Initialize trunk + adapter table.
     bool init(const RavenNetConfig& cfg);
 
-    // Batched inference (spec §2.4.2.a). torch::InferenceMode inside.
+    // Batched inference (spec §2.4.2.a). Hand-rolled forward, no autograd.
     // obs_flat   : N × d_obs floats row-major
     // adapter_idx: N int64s
     // out_biases : N × d_action floats (written)

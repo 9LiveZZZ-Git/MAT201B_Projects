@@ -21,7 +21,7 @@ struct ReflectionThread {
     static constexpr int JOB_QUEUE_CAP  = 512;
 
     // Start background thread; returns false if model fails to load.
-    bool start(const std::string& model_path, int n_gpu_layers = 0);  // CPU-only; VRAM for libtorch
+    bool start(const std::string& model_path, int n_gpu_layers = 0);  // args kept for API parity; ignored
     void stop();
     ~ReflectionThread() { stop(); }
 

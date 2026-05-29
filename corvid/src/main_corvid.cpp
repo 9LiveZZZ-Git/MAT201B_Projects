@@ -295,28 +295,10 @@ struct CorvidM1 : public DistributedAppWithState<CorvidVizState> {
 #endif
 
 #ifdef CORVID_USE_LLM
-        {
-            // Model path: next to exe, or in assets/models/ relative to project root
-            const char* model_candidates[] = {
-                "assets/models/gemma-4-E2B-it-Q4_K_M.gguf",
-                "../../assets/models/gemma-4-E2B-it-Q4_K_M.gguf",
-                "../../../assets/models/gemma-4-E2B-it-Q4_K_M.gguf",
-            };
-            std::string model_path;
-            for (auto* c : model_candidates) {
-                if (FILE* f = std::fopen(c, "rb")) { std::fclose(f); model_path = c; break; }
-            }
-            if (model_path.empty()) { // ngl=0: CPU-only, VRAM reserved for libtorch
-                if (FILE* f = std::fopen("reflection.log", "a"))
-                    { std::fprintf(f, "[M13-A] no E2B model found; heuristic fallback\n"); std::fclose(f); }
-            } else {
-                llm_ready_ = reflect_thread_.start(model_path, /*ngl=*/0);
-                if (!llm_ready_) {
-                    FILE* f = std::fopen("reflection.log", "a");
-                    if (f) { std::fprintf(f, "[M13-A] model load failed; heuristic fallback\n"); std::fclose(f); }
-                }
-            }
-        }
+        // Reflection now runs the native procedural reflector on a background
+        // thread (no LLM / no model file). The model_path arg is ignored — kept
+        // for API parity. Always "ready" so jobs flow through the scheduler.
+        llm_ready_ = reflect_thread_.start("", /*ngl=*/0);
 #endif
         // --- Part B: tuned lens + generative visuals ---
         // Crow images live in assets/crows/ (resolved relative to project root,

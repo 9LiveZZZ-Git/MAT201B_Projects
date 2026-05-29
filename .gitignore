@@ -46,6 +46,7 @@ corvid/vendor/libtorch/
 corvid/vendor/libtorch-win-cu126.zip
 corvid/vendor/libtorch-win-cpu.zip
 corvid/debug_out.txt
+corvid/distributed_app.toml
 
 # Local working docs (notes/plans, not project source)
 corvid/docs/
