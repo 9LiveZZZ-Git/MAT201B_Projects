@@ -1,10 +1,9 @@
-// World of Shadow Work — runtime (M2).
-// An autonomous, distributed AlloSphere piece: a navigable multimodal CLIP galaxy
-// (every grain = one corpus image/word). The Conductor walks the k-NN graph LIVE; the
-// camera follows its fixation and wobbles when it hesitates (= entropy of its choice),
-// with a glowing orb marking where the machine is "looking." Later milestones add the
-// human trace, smoke/vessel shells, and audio. Runtime is allolib-only; custom GLSL
-// through al::ShaderProgram.
+// World of Shadow Work — runtime.
+// An autonomous, distributed AlloSphere piece: a multimodal CLIP galaxy that SURROUNDS the
+// viewer (camera inside; webs central). The Conductor walks the k-NN graph LIVE; when it
+// fixates an image, that photo surfaces at its node and dissolves into grains that stream
+// into the galaxy (the human->machine cede). A morphing splat "vessel" sits at the core.
+// Runtime is allolib-only; custom GLSL through al::ShaderProgram.
 #include "al/app/al_App.hpp"
 #include "al/app/al_DistributedApp.hpp"
 #include "al/math/al_Quat.hpp"
@@ -33,6 +32,8 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   Conductor     conductor;
   VesselSplats  vessel;
   HumanTrace    trace;
+  int           lastCurNode_ = -1;
+  static constexpr float TRACE_LIFE = 4.5f;   // seconds a surfaced photo lives
   std::string   assetDir = "assets";
 
   void onCreate() override {
@@ -66,21 +67,39 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       s.focusPos[0] = focus.x; s.focusPos[1] = focus.y; s.focusPos[2] = focus.z;
       s.vesselKf   = float(conductor.visits()) + conductor.progress();
 
-      // Human trace: surface the fixated image's photo, dissolving as the machine moves on.
+      // Human trace ring: age + expire surfaced photos; surface a new one when the machine
+      // settles on a hero image (multiple can be alive at once, at their node positions).
+      for (int i = 0; i < WoSWState::N_TRACE; ++i)
+        if (s.traceNode[i] >= 0) {
+          s.traceAge[i] += float(dt);
+          if (s.traceAge[i] > TRACE_LIFE) s.traceNode[i] = -1;
+        }
       const int cn = conductor.curNode();
-      if (cn >= 0 && field.typeOf(cn) == 0 && field.atlasOf(cn) >= 0) {
-        s.traceNode = float(cn);
-        const float pr = conductor.progress();
-        const float ta = (pr < 0.15f) ? (pr / 0.15f) : (1.f - (pr - 0.15f) / 0.85f);
-        s.traceAlpha = ta < 0.f ? 0.f : ta;
-      } else {
-        s.traceNode = -1.f; s.traceAlpha = 0.f;
+      if (cn != lastCurNode_) {                  // arrived at a new node
+        lastCurNode_ = cn;
+        if (cn >= 0 && field.typeOf(cn) == 0 && field.atlasOf(cn) >= 0) {
+          bool present = false; int freeSlot = -1, oldest = 0;
+          for (int i = 0; i < WoSWState::N_TRACE; ++i) {
+            if (s.traceNode[i] == cn) present = true;
+            if (s.traceNode[i] < 0 && freeSlot < 0) freeSlot = i;
+            if (s.traceAge[i] > s.traceAge[oldest]) oldest = i;
+          }
+          if (!present) {
+            const int slot = (freeSlot >= 0) ? freeSlot : oldest;
+            s.traceNode[slot] = cn; s.traceAge[slot] = 0.f;
+          }
+        }
       }
 
-      // Camera: calm slow orbit, closer in so the galaxy fills the frame.
-      const float t = s.simTime * 0.05f, R = 11.f;
-      nav().pos().set(R * std::sin(t), 1.0 * std::sin(t * 0.5f), R * std::cos(t));
-      nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
+      // Camera: INSIDE the galaxy (it surrounds you), gentle drift + slow yaw to pan the 360.
+      // In the dome the omni renderer shows all directions from this point; desktop shows the
+      // forward slice.
+      const double t = s.simTime;
+      const Vec3d eye(1.8 * std::sin(t * 0.045), 0.9 * std::sin(t * 0.031), 1.8 * std::cos(t * 0.045));
+      nav().pos().set(eye.x, eye.y, eye.z);
+      const double yaw = t * 0.05;
+      const Vec3d look = eye + Vec3d(std::sin(yaw), 0.12 * std::sin(t * 0.02), std::cos(yaw)) * 6.0;
+      nav().faceToward(look, Vec3d(0, 1, 0));
 
       // pack pose for renderers
       const auto p = nav().pos();
@@ -103,24 +122,23 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     webs.draw(g);                     // similarity webs under the points
     field.draw(g, 1.f);
 
-    // The outer "vessel": the machine's morphing image-to-3D dream-body, at the galaxy
-    // center. The camera calmly orbits it; depth-crossfade with the galaxy comes later.
-    vessel.draw(g, Vec3f(0, 0, 0), 1.6f, 0.5f);
+    // The "vessel" at the core — faint central haze (the missing splat middle; comes from Colab).
+    vessel.draw(g, Vec3f(0, 0, 0), 1.3f, 0.3f);
 
-    // Human trace: the fixated image's photo surfaces in front of the camera, then dissolves.
+    // Human traces: photos surface at their node positions all around you (multiple at once),
+    // each dissolving into grains that stream out into the galaxy.
     auto& s = state();
-    if (int(s.traceNode) >= 0 && s.traceAlpha > 0.001f && trace.ready()) {
+    if (trace.ready()) {
       Quatd q(s.navQuat[3], s.navQuat[0], s.navQuat[1], s.navQuat[2]);
-      Vec3d fwd = q.rotate(Vec3d(0, 0, -1));
       Vec3d rgt = q.rotate(Vec3d(1, 0, 0));
       Vec3d upv = q.rotate(Vec3d(0, 1, 0));
-      Vec3f center(s.navPos[0] + float(fwd.x) * 5.f,
-                   s.navPos[1] + float(fwd.y) * 5.f,
-                   s.navPos[2] + float(fwd.z) * 5.f);
-      trace.draw(g, center,
-                 Vec3f(float(rgt.x), float(rgt.y), float(rgt.z)),
-                 Vec3f(float(upv.x), float(upv.y), float(upv.z)),
-                 field.atlasOf(int(s.traceNode)), s.traceAlpha, 2.6f);
+      const Vec3f camR(float(rgt.x), float(rgt.y), float(rgt.z));
+      const Vec3f camU(float(upv.x), float(upv.y), float(upv.z));
+      for (int i = 0; i < WoSWState::N_TRACE; ++i) {
+        if (s.traceNode[i] < 0) continue;
+        trace.draw(g, field.posOf(s.traceNode[i]), camR, camU,
+                   field.atlasOf(s.traceNode[i]), s.traceAge[i], TRACE_LIFE);
+      }
     }
   }
 

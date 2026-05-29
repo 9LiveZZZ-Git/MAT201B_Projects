@@ -28,9 +28,10 @@ struct WoSWState {
   float    focusPos[3] = {0.f, 0.f, 0.f};  // current fixation point (legibility)
   float    vesselKf    = 0.f;              // continuous vessel keyframe position (morph)
 
-  // Human trace (M2+): which image is surfacing, and how strongly.
-  float    traceNode  = -1.f;
-  float    traceAlpha = 0.f;
+  // Human trace ring — multiple photos surfacing at their node positions (sphere edition).
+  static constexpr int N_TRACE = 6;
+  int32_t  traceNode[N_TRACE] = {-1, -1, -1, -1, -1, -1};
+  float    traceAge[N_TRACE]  = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
 };
 
 }  // namespace wosw
