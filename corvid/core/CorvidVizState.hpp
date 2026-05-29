@@ -17,7 +17,9 @@
 namespace corvid {
 
 // Max agents broadcast to renderers (visual subset; matches SimpleSharedState scale).
-static constexpr int VIZ_MAX_AGENTS = 200;
+static constexpr int VIZ_MAX_AGENTS   = 200;
+// Max entities (plants + boulders + hawks). 20+5+3 today; headroom for growth.
+static constexpr int VIZ_MAX_ENTITIES = 64;
 
 struct AgentXform {
     float    pos[3]   = {0, 0, 0};
@@ -29,13 +31,25 @@ struct AgentXform {
     int32_t  live     = 0;             // 1 if alive
 };
 
+// Entity transform broadcast so renderer nodes draw plants/boulders/HAWKS too
+// (previously primary-only -> hawks were invisible on the dome).
+struct EntityXform {
+    float   pos[3]   = {0, 0, 0};
+    float   quat[4]  = {0, 0, 0, 1};   // x,y,z,w (hawk orientation; identity otherwise)
+    float   scale    = 0.4f;           // interaction radius (used by obstacle render)
+    int32_t category = 0;              // EntityCategory: 0 PLANT,1 PREDATOR,2 OBSTACLE,...
+    int32_t alive    = 1;
+};
+
 struct CorvidVizState {
-    uint32_t      tick      = 0;
-    float         sim_time  = 0.f;
-    int32_t       n_agents  = 0;        // valid entries in xform[]
-    int32_t       focus_idx = -1;       // index into xform[] of focused agent
-    ThoughtVector thought;              // drives skybox + splats on every node
+    uint32_t      tick       = 0;
+    float         sim_time   = 0.f;
+    int32_t       n_agents   = 0;        // valid entries in xform[]
+    int32_t       n_entities = 0;        // valid entries in entity[]
+    int32_t       focus_idx  = -1;       // index into xform[] of focused agent
+    ThoughtVector thought;               // drives skybox + splats on every node
     AgentXform    xform[VIZ_MAX_AGENTS];
+    EntityXform   entity[VIZ_MAX_ENTITIES];
 };
 
 } // namespace corvid

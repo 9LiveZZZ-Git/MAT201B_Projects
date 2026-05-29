@@ -74,6 +74,15 @@ public:
 
     float interaction_radius() const override { return 0.4f; }
 
+    // Orientation broadcast to renderer nodes: face the velocity (matches draw()).
+    al::Quatf renderOrientation() const override {
+        if (velocity.mag() > 0.01f) {
+            al::Vec3f fwd = al::Vec3f(velocity).normalize();
+            return al::Quatf::getRotationTo(al::Vec3f(0, 0, -1), fwd);
+        }
+        return al::Quatf();
+    }
+
     void draw(al::Graphics& g) override {
         g.pushMatrix();
         g.translate(position);

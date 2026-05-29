@@ -188,8 +188,10 @@ struct CorvidM1 : public DistributedAppWithState<CorvidVizState> {
     float hud_sample_acc = 0.f;    // accumulates dt until 1s sample
     int   hud_births_tick = 0, hud_deaths_tick = 0;  // since last sample
 
-    // shared tetrahedron mesh (populated in onCreate)
-    Mesh tetra_m{Mesh::TRIANGLES};
+    // shared meshes (populated in onCreate) — also used to draw broadcast entities
+    Mesh tetra_m{Mesh::TRIANGLES};   // agents + hawks
+    Mesh sphere_m{Mesh::TRIANGLES};  // acorn plants
+    Mesh cube_m{Mesh::TRIANGLES};    // boulders
 
     // ---------------------------------------------------------------------------
     // Helper: toroidal wrap a Vec3f into [-HALF_W, HALF_W]
@@ -332,8 +334,10 @@ struct CorvidM1 : public DistributedAppWithState<CorvidVizState> {
         if (!splats.init(crow_one, student, 4000))
             std::fprintf(stderr, "[corvid] splat shader failed to compile\n");
 
-        // Build tetrahedron mesh once
+        // Build shared meshes once (entity rendering on renderer nodes reuses them)
         addTetrahedron(tetra_m);
+        addSphere(sphere_m, 1.0, 8, 6);
+        addCube(cube_m);
 
         // Place grid
         initPlaces(places, HALF_W);
@@ -1103,6 +1107,43 @@ struct CorvidM1 : public DistributedAppWithState<CorvidVizState> {
         }
         state().n_agents  = n;
         state().focus_idx = focus_out;
+
+        // Broadcast entity transforms so renderer nodes draw plants/boulders/hawks.
+        int ne = 0;
+        for (auto& e : entities) {
+            if (ne >= VIZ_MAX_ENTITIES) break;
+            EntityXform& ex = state().entity[ne];
+            ex.pos[0] = e->position.x; ex.pos[1] = e->position.y; ex.pos[2] = e->position.z;
+            al::Quatf q = e->renderOrientation();
+            ex.quat[0] = q.x; ex.quat[1] = q.y; ex.quat[2] = q.z; ex.quat[3] = q.w;
+            ex.scale    = e->interaction_radius();
+            ex.category = int32_t(e->category);
+            ex.alive    = e->alive ? 1 : 0;
+            ++ne;
+        }
+        state().n_entities = ne;
+    }
+
+    // Draw one broadcast entity (runs on every node, primary + renderers).
+    void drawEntityFromState(Graphics& g, const EntityXform& ex) {
+        g.pushMatrix();
+        g.translate(ex.pos[0], ex.pos[1], ex.pos[2]);
+        if (ex.category == PREDATOR) {
+            g.rotate(Quatf(ex.quat[3], ex.quat[0], ex.quat[1], ex.quat[2]));
+            g.scale(0.30f);
+            g.color(0.95f, 0.15f, 0.1f, 0.92f);
+            g.draw(tetra_m);
+        } else if (ex.category == OBSTACLE) {
+            g.scale(ex.scale * 1.4f);
+            g.color(0.45f, 0.42f, 0.40f, 0.88f);
+            g.draw(cube_m);
+        } else {  // PLANT (and any other nutritive entity)
+            g.scale(ex.alive ? 0.18f : 0.06f);
+            if (ex.alive) g.color(0.1f, 0.85f, 0.2f, 0.9f);
+            else          g.color(0.15f, 0.3f, 0.1f, 0.3f);
+            g.draw(sphere_m);
+        }
+        g.popMatrix();
     }
 
     // ---------------------------------------------------------------------------
@@ -1144,10 +1185,9 @@ struct CorvidM1 : public DistributedAppWithState<CorvidVizState> {
         g.blendTrans();
         g.depthTesting(true);
 
-        // --- entities + place grid: primary-only (not broadcast) ---
-        if (isPrimary())
-        for (auto& e : entities)
-            e->draw(g);
+        // --- entities: drawn from broadcast state on every node (hawks included) ---
+        for (int e = 0; e < state().n_entities; ++e)
+            drawEntityFromState(g, state().entity[e]);
 
         // --- Part B: crow splat cloud, anchored on the focused corvid ---
         if (show_splats && splats.ready()) {

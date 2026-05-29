@@ -1,5 +1,6 @@
 #pragma once
 #include "al/graphics/al_Graphics.hpp"
+#include "al/math/al_Quat.hpp"
 #include "al/math/al_Vec.hpp"
 #include <string>
 
@@ -50,6 +51,10 @@ public:
 
     // Broad-phase AABB half-extent (for spatial hash or culling).
     virtual float broad_radius() const { return interaction_radius() * 1.5f; }
+
+    // Render orientation broadcast to dome renderer nodes (identity unless the
+    // entity has a heading, e.g. a hawk facing its velocity).
+    virtual al::Quatf renderOrientation() const { return al::Quatf(); }
 };
 
 } // namespace corvid
