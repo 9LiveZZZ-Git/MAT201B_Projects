@@ -76,7 +76,10 @@ class AudioEngine {
   std::atomic<int>   cClusterId_{0}, cVisits_{0};
   std::atomic<float> cMoodBright_{0.5f}, cMoodDens_{0.3f}, cMoodWet_{0.3f};
   // arrangement gates (sim sets per-section targets; audio glides) + dubstep growl amount
-  std::atomic<float> cDroneGate_{1.f}, cWhisperGate_{1.f}, cGrainGate_{1.f}, cGrowl_{0.f};
+  std::atomic<float> cGrowl_{0.f};
+  // per-element DROPOUT gates: each element fades/cuts in & out independently over ~10 min.
+  enum { G_DRONE, G_WHISPER, G_GRAIN, G_KICK, G_BASS, G_MEL, G_BELL, G_TIMP, NGATE };
+  std::array<std::atomic<float>, NGATE> cGate_, cGateTau_;   // target + glide time-constant (fade vs sudden)
   std::atomic<float> cFmt0_{500.f}, cFmt1_{1500.f}, cFmt2_{2500.f};   // formants of the last whispered word
 
   // ---------- sim-side state ----------
@@ -92,6 +95,8 @@ class AudioEngine {
   float       mbTgt_ = 0.5f, mdTgt_ = 0.3f, mwTgt_ = 0.3f;
   // arrangement section + recognizable public-domain melody player (sim thread)
   int         section_ = 0, melTune_ = 0, melNote_ = 0; bool melodyOn_ = false; float melNoteTimer_ = 0.f;
+  float       dropT_[NGATE] = {}, dropTgt_[NGATE] = {1, 1, 1, 1, 1, 1, 1, 1};   // per-element dropout scheduler
+  uint32_t    dprng_ = 0xDEADBEEFu;
 
   // ---------- audio-side voices ----------
   struct Voice {
@@ -132,7 +137,7 @@ class AudioEngine {
   int   lastClusterId_ = -999;
   float duckGain_ = 1.f, lowDuck_ = 1.f, kickDuck_ = 1.f;   // bed + low-end duck under whisper; sub sidechain vs kick
   // arrangement gates (glided) + dubstep growl LFO/filter + ping-pong delay (grains+whispers)
-  float droneGate_ = 1.f, whisperGate_ = 1.f, grainGate_ = 1.f, growl_ = 0.f;
+  float growl_ = 0.f, gate_[NGATE] = {};               // smoothed per-element dropout gates (audio)
   float wobPhase_ = 0.f, growlLp_ = 0.f, growlBp_ = 0.f, wobMult_ = 1.f, wobChange_ = 0.f;
   float growlDuty_ = 1.f, growlDutyTgt_ = 1.f, growlOutLp_ = 0.f;   // sometimes off -> clean drone; LP keeps it off the bass
   float growlFmtCoef_[3][3] = {}, growlFz_[3][2] = {}, lastFmt_[3] = {0.f, 0.f, 0.f};  // talking-growl formants
