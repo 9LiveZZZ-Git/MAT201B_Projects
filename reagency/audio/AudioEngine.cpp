@@ -64,7 +64,7 @@ static bool parseNoteHz(const std::string& name, float& hz) {
 }
 void AudioEngine::loadSamples(const std::string& assetDir) {
   const std::string bases[] = { assetDir + "/audio", "assets/audio", "../../assets/audio", "reagency/assets/audio", "MAT201B_Projects/reagency/assets/audio" };
-  auto add = [](Role& r, int idx) { if (r.n < 24) r.idx[r.n++] = idx; };
+  auto add = [](Role& r, int idx) { if (r.n < 64) r.idx[r.n++] = idx; };
   for (const auto& b : bases) {
     DIR* d = opendir(b.c_str()); if (!d) continue;
     struct dirent* e;
@@ -95,8 +95,8 @@ int AudioEngine::pickSample(Role& r, float hz) {
   if (r.n == 0) return -1;
   float best = 1e9f;
   for (int i = 0; i < r.n; ++i) { const Sample& s = samples_[r.idx[i]]; float dd = s.pitched ? std::fabs(std::log2(s.rootHz / hz)) : 0.f; if (dd < best) best = dd; }
-  int cand[24], nc = 0;
-  for (int i = 0; i < r.n; ++i) { const Sample& s = samples_[r.idx[i]]; float dd = s.pitched ? std::fabs(std::log2(s.rootHz / hz)) : 0.f; if (dd <= best + 0.34f && nc < 24) cand[nc++] = r.idx[i]; }
+  int cand[64], nc = 0;
+  for (int i = 0; i < r.n; ++i) { const Sample& s = samples_[r.idx[i]]; float dd = s.pitched ? std::fabs(std::log2(s.rootHz / hz)) : 0.f; if (dd <= best + 0.34f && nc < 64) cand[nc++] = r.idx[i]; }
   if (nc == 0) return r.idx[0];
   return cand[(r.rr++) % nc];
 }

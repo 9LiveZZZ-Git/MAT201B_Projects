@@ -48,7 +48,7 @@ class AudioEngine {
 
   // ---------- CC0 sample bank ----------
   struct Sample { std::vector<float> data; float srcSR = 44100.f; float rootHz = 220.f; bool pitched = true; };
-  struct Role   { int idx[24]; int n = 0; int rr = 0; };
+  struct Role   { int idx[64]; int n = 0; int rr = 0; };
   std::vector<Sample> samples_;
   Role rBass_, rPluck_, rBell_, rTrace_, rTimp_, rMetal_;
   void loadSamples(const std::string& assetDir);
