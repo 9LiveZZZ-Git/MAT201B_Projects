@@ -140,7 +140,7 @@ void AudioEngine::init(const std::string& assetDir, double sampleRate) {
   sr_ = sampleRate > 0 ? sampleRate : 44100.0;
   loadManifest(assetDir); loadSamples(assetDir); loadWords(assetDir);
   reverb_.bandwidth(0.9f); reverb_.damping(0.45f); reverb_.decay(0.9f);
-  sampRev_.bandwidth(0.9f); sampRev_.damping(0.55f); sampRev_.decay(0.42f);   // short room for the samples
+  sampRev_.bandwidth(0.9f); sampRev_.damping(0.5f); sampRev_.decay(0.62f);   // room for the samples (longer)
   cClusterRoot_.store(root_, std::memory_order_relaxed); subHz_ = root_ * 0.25f;
   for (int p = 0; p < PADN; ++p) padHz_[p] = root_ * kJI[p == 0 ? 0 : (p == 1 ? 2 : (p == 2 ? 5 : 7))];
   ppN_ = int(sr_ * 0.55); if (ppN_ < 64) ppN_ = 64;    // ping-pong delay buffers (allocated once)
@@ -311,7 +311,10 @@ float AudioEngine::tickVoice(Voice& v, float isr, float depth, float bright) {
   if (v.layer == 9) { float n = vrand(v.grng) * 2.f - 1.f; v.lp = dn(v.lp + 0.5f * (n - v.lp)); return (n - v.lp) * std::exp(-v.age / 0.0035f) * v.amp; }   // off-beat "and" click (high-passed)
   if (v.smp) { if (v.smpPos >= v.smpLen - 2) { v.on = false; return 0.f; } int i0 = int(v.smpPos); float fr = v.smpPos - i0; float s = v.smp[i0]*(1.f-fr) + v.smp[i0+1]*fr; v.smpPos += v.smpRate;
     float env; if (v.layer == 3 || v.layer == 5) env = (u < (v.atk/v.life)) ? (u/std::max(1e-4f, v.atk/v.life)) : (u < 0.6f ? 1.f : std::max(0.f, 1.f-(u-0.6f)/0.4f));
-    else { float a = v.atk/v.life; env = (u < a) ? (u/std::max(1e-4f,a)) : (u > 0.85f ? (1.f-(u-0.85f)/0.15f) : 1.f); } return s * env * v.amp; }
+    else { float a = v.atk/v.life; env = (u < a) ? (u/std::max(1e-4f,a)) : (u > 0.85f ? (1.f-(u-0.85f)/0.15f) : 1.f); }
+    v.phase += 41.f * isr; if (v.phase >= 1.f) v.phase -= 1.f;                          // slight GRANULATION:
+    float gmod = 0.74f + 0.26f * (0.5f - 0.5f * std::cos(kTAU * v.phase));              // a soft grain-window flutter
+    return s * env * v.amp * gmod; }
   if (v.layer == 4) {
     // step the formant resonators through the word's vowels (speech-like synthesis)
     int sk = (u < v.body) ? int((u / v.body) * float(v.syl)) : (v.syl - 1); if (sk < 0) sk = 0; if (sk >= v.syl) sk = v.syl - 1;
@@ -528,7 +531,7 @@ void AudioEngine::render(al::AudioIOData& io) {
       ppL_[ppPos_] = dn(ppSendL + dR * 0.42f); ppR_[ppPos_] = dn(ppSendR + dL * 0.42f); ppPos_ = (ppPos_ + 1) % ppN_;
       bedL += dL * 0.32f; bedR += dR * 0.32f; }
     // short MONO reverb to blend the CC0 samples (pluck/bell/trace/organ)
-    { float sw1 = 0.f, sw2 = 0.f; sampRev_(sampSend * 0.5f, sw1, sw2, 0.5f); float sw = 0.5f * (sw1 + sw2); bedL += sw * 0.3f; bedR += sw * 0.3f; }
+    { float sw1 = 0.f, sw2 = 0.f; sampRev_(sampSend * 0.6f, sw1, sw2, 0.6f); float sw = 0.5f * (sw1 + sw2); bedL += sw * 0.5f; bedR += sw * 0.5f; }   // more sample reverb
 
     float w1 = 0.f, w2 = 0.f; reverb_(revSend * 0.5f, w1, w2, 0.6f);
     float L = duckGain_ * bedL + leadL + lowDuck_ * lowMono + reverbWet_ * w1;
