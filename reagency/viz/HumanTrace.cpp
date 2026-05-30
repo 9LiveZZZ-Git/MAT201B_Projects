@@ -122,7 +122,7 @@ bool HumanTrace::init(const std::string& assetDir) {
 }
 
 void HumanTrace::draw(Graphics& g, const Vec3f& nodePos, const Vec3f& camRight,
-                      const Vec3f& camUp, int slot, float age, float lifetime) {
+                      const Vec3f& camUp, int slot, float age, float lifetime, float converge) {
   if (!ready() || slot < 0) return;
   const float t01 = (lifetime > 0.f) ? std::min(1.f, age / lifetime) : 1.f;
 
@@ -174,8 +174,11 @@ void HumanTrace::draw(Graphics& g, const Vec3f& nodePos, const Vec3f& camRight,
       const float h3 = hashf(slot * 53 + i * 7 + 3);
       const float th = h1 * 6.2831853f, z = h2 * 2.f - 1.f, rr = std::sqrt(std::max(0.f, 1.f - z * z));
       const Vec3f dir(rr * std::cos(th), rr * std::sin(th), z);
-      const Vec3f p = nodePos + dir * (gp * SPREAD * (0.4f + 0.8f * h3));
-      const float ga = gp * (1.3f - gp) * (0.5f + 0.5f * h3);   // peak mid-flight, fade at end
+      const Vec3f outP = nodePos + dir * (gp * SPREAD * (0.4f + 0.8f * h3));
+      // Act-IV TURN: REVERSE the cede — lerp the grain inward to the core (0,0,0) as converge->1.
+      const Vec3f p = outP - outP * converge;                        // mix(outP, origin, converge)
+      float ga = gp * (1.3f - gp) * (0.5f + 0.5f * h3);              // peak mid-flight, fade at end
+      ga *= (1.f - 0.55f * converge);                                // dim as it collapses into the knot
       grains_.vertex(p.x, p.y, p.z);
       grains_.color(avg.x, avg.y, avg.z, ga);
     }

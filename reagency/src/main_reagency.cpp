@@ -255,6 +255,12 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     // map of what the machine thinks the imagery IS).
     labels.drawClusters(g, camR, camU, 0.32f);     // words floating IN the galaxy, subtly
 
+    // Act-IV TURN: the cede REVERSES at the deep-core descent (Act IV, or a SPACE dive). Derived
+    // from the synced depth so it's identical on every dome node: grains stream INWARD, not out.
+    float turnConverge = (0.20f - s.depth) / (0.20f - 0.08f);
+    turnConverge = turnConverge < 0.f ? 0.f : (turnConverge > 1.f ? 1.f : turnConverge);
+    turnConverge = turnConverge * turnConverge * (3.f - 2.f * turnConverge);   // smoothstep
+
     // Human traces: photos surface at their node positions (multiple at once), dissolving into
     // grains that stream into the galaxy — and the word the machine classifies each as.
     if (trace.ready()) {
@@ -262,7 +268,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
         if (s.traceNode[i] < 0) continue;
         const Vec3f p = field.posOf(s.traceNode[i]);
         const float a = s.traceAge[i];
-        trace.draw(g, p, camR, camU, field.atlasOf(s.traceNode[i]), a, TRACE_LIFE);
+        trace.draw(g, p, camR, camU, field.atlasOf(s.traceNode[i]), a, TRACE_LIFE, turnConverge);
         // its classifying word, just below the photo, fading on the same envelope
         const float r01 = a / TRACE_LIFE;
         float lab = (r01 < 0.12f) ? (r01 / 0.12f)

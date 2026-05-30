@@ -25,8 +25,10 @@ struct HumanTrace {
 
   // Draw ONE active trace: the photo for atlas `slot` as a camera-facing quad at `nodePos`,
   // fading + dissolving by `age` (0..lifetime), with grains streaming out into the galaxy.
+  // converge (0..1): the Act-IV TURN REVERSES the cede — grains stream INWARD to a dim knot at the
+  // core (0,0,0) instead of dispersing outward. 0 = normal outward cede.
   void draw(al::Graphics& g, const al::Vec3f& nodePos, const al::Vec3f& camRight,
-            const al::Vec3f& camUp, int slot, float age, float lifetime);
+            const al::Vec3f& camUp, int slot, float age, float lifetime, float converge = 0.f);
 
  private:
   al::Texture       tex_;
