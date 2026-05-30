@@ -28,6 +28,11 @@ struct LabelLayer {
   int  slotForNode(int node) const {
     auto it = nodeSlot_.find(node); return it == nodeSlot_.end() ? -1 : it->second;
   }
+  // The classification WORD for a node ("" if unknown) — used by the audio whisper.
+  std::string wordForNode(int node) const {
+    auto it = nodeSlot_.find(node); if (it == nodeSlot_.end()) return "";
+    auto w = slotWord_.find(it->second); return w == slotWord_.end() ? "" : w->second;
+  }
 
  private:
   al::Texture       tex_;
@@ -39,6 +44,7 @@ struct LabelLayer {
   struct CL { al::Vec3f pos; int slot; };
   std::vector<CL> clusters_;
   std::unordered_map<int, int> nodeSlot_;
+  std::unordered_map<int, std::string> slotWord_;   // slot -> word text (for the audio whisper)
 
   bool loadAtlas(const std::string& path);
   void loadText(const std::string& assetDir);

@@ -49,6 +49,11 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   // per period. depth: 1 = galaxy out among the points, 0 = sunk into the core vessel shell.
   float         depthPhase_ = 0.f;
   static constexpr float DEPTH_PERIOD = 80.0f;  // seconds for a full galaxy->vessel->galaxy tide
+  // Manual dive: SPACE toggles a descent straight to the core vessel (depth->0), overriding the
+  // tide so the splat "vessel" can be summoned on demand (demo/verify; also the seed of the
+  // Act-IV plunge). Eases in/out for a smooth, reversible plunge.
+  float         diveOverride_ = 0.f;            // eased 0..1
+  bool          diveActive_   = false;          // toggled by SPACE
   std::string   assetDir = "assets";
 
   void onCreate() override {
@@ -140,7 +145,11 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       depthPhase_ += float(dt) * (1.f - 0.4f * s.hesitation) / DEPTH_PERIOD;
       const float u   = depthPhase_ * 6.2831853f;
       const float raw = 0.5f - 0.5f * std::cos(u);          // 0..1, starts at vessel
-      s.depth = std::pow(raw, 0.6f);                          // dwell longer in the galaxy
+      const float tideDepth = std::pow(raw, 0.6f);            // dwell longer in the galaxy
+      // Manual dive override: ease toward the core when active (SPACE), back to the tide when not.
+      const float diveTarget = diveActive_ ? 1.f : 0.f;
+      diveOverride_ += (diveTarget - diveOverride_) * std::min(1.f, float(dt) * 2.5f);  // ~0.4s ease
+      s.depth = tideDepth * (1.f - diveOverride_);            // diveOverride_->1 sinks to the vessel (depth 0)
 
       // Camera. A DENSE corpus (the real ~10k) lets us sit INSIDE the cloud and be enveloped;
       // a small preview corpus is too sparse for inside-out (you'd see mostly void), so we
@@ -203,7 +212,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     field.draw(g, 1.f, galBright);
 
     // The "vessel" at the core — swells into an enveloping shell as we descend, faint central
-    // haze out in the galaxy (the missing splat middle comes from Colab).
+    // haze out in the galaxy. SPACE dives straight to it (see diveOverride_).
     vessel.draw(g, Vec3f(0, 0, 0), vesScale, vesAlpha);
 
     // Camera-facing axes (for billboards), from the synced pose.
@@ -238,6 +247,12 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   void onSound(AudioIOData& io) override {
     if (!isPrimary()) return;          // primary-only audio
     audio_.render(io);
+  }
+
+  // SPACE toggles the manual dive to the core vessel — summon the splats on demand.
+  bool onKeyDown(const Keyboard& k) override {
+    if (k.key() == ' ') { diveActive_ = !diveActive_; return true; }
+    return false;
   }
 };
 

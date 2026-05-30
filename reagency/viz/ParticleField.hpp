@@ -36,9 +36,11 @@ struct ParticleField {
   std::vector<al::Vec3f> colors() const;
 
   // Per-node lookups (HumanTrace / Conductor).
-  al::Vec3f posOf(int i)   const { return (i >= 0 && i < int(pts_.size())) ? pts_[i].pos : al::Vec3f(0, 0, 0); }
-  int       typeOf(int i)  const { return (i >= 0 && i < int(pts_.size())) ? pts_[i].type : -1; }
-  int       atlasOf(int i) const { return (i >= 0 && i < int(pts_.size())) ? pts_[i].atlas : -1; }
+  al::Vec3f posOf(int i)    const { return (i >= 0 && i < int(pts_.size())) ? pts_[i].pos : al::Vec3f(0, 0, 0); }
+  int       typeOf(int i)   const { return (i >= 0 && i < int(pts_.size())) ? pts_[i].type : -1; }
+  int       atlasOf(int i)  const { return (i >= 0 && i < int(pts_.size())) ? pts_[i].atlas : -1; }
+  float     densityOf(int i) const { return (i >= 0 && i < int(pts_.size())) ? pts_[i].density : 0.5f; }
+  int       clusterOf(int i) const { return (i >= 0 && i < int(pts_.size())) ? pts_[i].cluster : -1; }
 
  private:
   struct P {

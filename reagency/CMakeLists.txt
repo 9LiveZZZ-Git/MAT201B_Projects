@@ -28,6 +28,7 @@ add_executable(reagency
     viz/VesselSplats.cpp
     viz/HumanTrace.cpp
     viz/LabelLayer.cpp
+    audio/AudioEngine.cpp
     core/Conductor.cpp)
 target_link_libraries(reagency PRIVATE al Threads::Threads)
 target_include_directories(reagency PRIVATE ${REAGENCY_INCLUDE_DIRS})

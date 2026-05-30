@@ -25,6 +25,7 @@ set(_reagency_lib_srcs
     "${REAGENCY_ROOT}/viz/HumanTrace.cpp"
     "${REAGENCY_ROOT}/viz/LabelLayer.cpp"
     "${REAGENCY_ROOT}/core/Conductor.cpp"
+    "${REAGENCY_ROOT}/audio/AudioEngine.cpp"
 )
 
 if(NOT TARGET reagency_support)
