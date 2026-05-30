@@ -229,10 +229,10 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
     dropT_[i] -= dt;
     if (dropT_[i] <= 0.f) {
       bool on = dropTgt_[i] > 0.5f;
-      dropTgt_[i] = on ? (dr() < 0.28f ? 0.f : 1.f) : 1.f;                              // ~28% chance an ON element drops
+      dropTgt_[i] = on ? (dr() < 0.24f ? 0.f : 1.f) : 1.f;                              // ~24% chance an ON element drops
       cGate_[i].store(dropTgt_[i], std::memory_order_relaxed);
       cGateTau_[i].store((dr() < 0.45f) ? (0.012f + 0.03f * dr()) : (1.2f + 3.0f * dr()), std::memory_order_relaxed);  // sudden OR fade
-      dropT_[i] = (dropTgt_[i] > 0.5f) ? (16.f + 55.f * dr()) : (6.f + 16.f * dr());    // on 16-71 s, off 6-22 s
+      dropT_[i] = (dropTgt_[i] > 0.5f) ? (18.f + 55.f * dr()) : (25.f + 20.f * dr());   // on 18-73 s, SILENCE 25-45 s
     }
   }
   // recognizable PD melody: emit the next note ~once per beat; grains gated down so it emerges
@@ -451,7 +451,7 @@ void AudioEngine::render(al::AudioIOData& io) {
     float ttgt = padRoot * 0.25f; if (ttgt > 35.f) ttgt = 35.f;          // 35 Hz and below
     triHz_ += (ttgt - triHz_) * 0.0004f; triPhase_ += triHz_ * isr; if (triPhase_ >= 1.f) triPhase_ -= 1.f;
     kickDuck_ += (1.f - kickDuck_) * 0.00025f;                            // recover (~90 ms) from the kick duck
-    float subPulse = 0.8f + 0.2f * (0.5f + 0.5f * std::cos(kTAU * euPhase_));   // subtle slow pulse on the beat
+    float subPulse = 0.42f + 0.58f * std::exp(-euPhase_ * 6.5f);   // fast ATTACK on each beat, then settle
     lowMono += (4.f * std::fabs(triPhase_ - 0.5f) - 1.f) * 0.45f * kickDuck_ * subPulse * gate_[G_BASS];
 
     // MOVING JI drone: per-partial slow tremolo + detune drift + vibrato
