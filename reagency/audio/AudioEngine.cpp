@@ -204,36 +204,44 @@ void AudioEngine::whisper(const std::string& word, int node, float pan) {
   cFmt0_.store(f0, std::memory_order_relaxed); cFmt1_.store(f1, std::memory_order_relaxed); cFmt2_.store(f2, std::memory_order_relaxed);  // -> talking growl
   Ev e{}; e.kind = EV_WHISPER; e.layer = 4; e.amp = 0.15f; e.pan = pan; e.islot = syl; e.vow = vow; e.a = f0; e.b = f1; e.c = f2; push(e);   // -10 dB
 }
-void AudioEngine::update(float dt, float hesitation, float depth, float progress, float focusPan) {
+void AudioEngine::update(float dt, float hesitation, float depth, float progress, float focusPan, int act) {
   if (!ready()) return; depth = clamp01(depth);
   simHes_ = hesitation; simDepth_ = depth;
   cHesitation_.store(hesitation, std::memory_order_relaxed); cDepth_.store(depth, std::memory_order_relaxed);
   cFocusPan_.store(focusPan < -1 ? -1 : (focusPan > 1 ? 1 : focusPan), std::memory_order_relaxed);
   activity_ *= std::pow(0.5f, dt / 0.8f); cActivity_.store(activity_, std::memory_order_relaxed); (void)progress;
 
-  // mood scheduler on FIBONACCI-second intervals
-  static const float FIB[6] = {8.f, 13.f, 21.f, 34.f, 55.f, 89.f};
-  auto sr = [&]() { sprng_ ^= sprng_ << 13; sprng_ ^= sprng_ >> 17; sprng_ ^= sprng_ << 5; return float(sprng_) / 4294967296.f; };
-  moodTimer_ -= dt;
-  if (moodTimer_ <= 0.f) {
-    moodTimer_ = FIB[int(sr() * 6.f) % 6]; mbTgt_ = sr(); mdTgt_ = sr(); mwTgt_ = sr();
-    float r = sr(); section_ = (r < 0.62f) ? 0 : (r < 0.84f) ? 2 : 4;   // full / growl / melody (dropouts handled per-element)
-    cGrowl_.store(section_ == 2 ? 1.f : 0.f, std::memory_order_relaxed);
-    if (section_ == 4) { melodyOn_ = true; melNote_ = 0; melTune_ = int(sr() * 3.f) % 3; melNoteTimer_ = 0.f; } else melodyOn_ = false;
-  }
+  // ---- 5-ACT ORCHESTRATION: the act sets the palette; the dropout scheduler textures WITHIN it ----
+  const int a = (act >= 1 && act <= 5) ? act : 1;
+  static const float ACTG[6][NGATE] = {                       // [G_DRONE,WHISPER,GRAIN,KICK,BASS,MEL,BELL,TIMP]
+    {1, 1, 1, 1, 1, 1, 1, 1},                                 //   fallback
+    {1.00f, 0.40f, 0.30f, 0.40f, 1.00f, 1.00f, 1.00f, 0.40f}, // I   SEDUCTION: lush bed + the tune
+    {1.00f, 1.00f, 0.40f, 0.50f, 1.00f, 0.30f, 0.70f, 0.50f}, // II  READING: the whisper leads
+    {0.70f, 0.85f, 1.00f, 1.00f, 1.00f, 0.00f, 0.20f, 1.00f}, // III EXTRACTION: grinding, dense, the cede
+    {0.00f, 1.00f, 1.00f, 1.00f, 0.30f, 0.00f, 0.00f, 0.30f}, // IV  TURN: STRIP to bare pulse (kick+grain+whisper)
+    {0.50f, 0.50f, 0.60f, 0.40f, 0.70f, 0.30f, 0.40f, 0.40f}, // V   INTEGRATION: thinned, haunted (comfort-FAIL)
+  };
+  static const float ACTM[6][3] = { {0.5f, 0.5f, 0.4f},       // mood: bright, density, wet
+    {0.70f, 0.40f, 0.55f}, {0.55f, 0.45f, 0.50f}, {0.35f, 0.85f, 0.35f}, {0.30f, 0.50f, 0.30f}, {0.45f, 0.35f, 0.45f} };
+  const float* aGate = ACTG[a];
+  section_ = a;
+  mbTgt_ = ACTM[a][0]; mdTgt_ = ACTM[a][1]; mwTgt_ = ACTM[a][2];
+  cGrowl_.store(a == 3 ? 1.f : (a == 4 ? 0.3f : 0.f), std::memory_order_relaxed);   // the grind in extraction
+  if (a == 1) { if (!melodyOn_) { melodyOn_ = true; melNote_ = 0; melTune_ = (melTune_ + 1) % 3; melNoteTimer_ = 0.f; } }
+  else melodyOn_ = false;                                     // the tune is the SEDUCTION only
   float mc = std::min(1.f, dt * 0.25f); moodBright_ += (mbTgt_ - moodBright_) * mc; moodDens_ += (mdTgt_ - moodDens_) * mc; moodWet_ += (mwTgt_ - moodWet_) * mc;
   cMoodBright_.store(moodBright_, std::memory_order_relaxed); cMoodDens_.store(moodDens_, std::memory_order_relaxed); cMoodWet_.store(moodWet_, std::memory_order_relaxed);
-  // PER-ELEMENT DROPOUTS: each element independently cuts/fades in & out over ~10 min (random style)
+  // per-element dropout TEXTURES within the act palette (an act-silent layer stays silent)
   auto dr = [&]() { dprng_ ^= dprng_ << 13; dprng_ ^= dprng_ >> 17; dprng_ ^= dprng_ << 5; return float(dprng_) / 4294967296.f; };
   for (int i = 0; i < NGATE; ++i) {
     dropT_[i] -= dt;
     if (dropT_[i] <= 0.f) {
       bool on = dropTgt_[i] > 0.5f;
-      dropTgt_[i] = on ? (dr() < 0.24f ? 0.f : 1.f) : 1.f;                              // ~24% chance an ON element drops
-      cGate_[i].store(dropTgt_[i], std::memory_order_relaxed);
+      dropTgt_[i] = on ? (dr() < 0.20f ? 0.f : 1.f) : 1.f;                            // ~20% chance an ON element drops
       cGateTau_[i].store((dr() < 0.45f) ? (0.012f + 0.03f * dr()) : (1.2f + 3.0f * dr()), std::memory_order_relaxed);  // sudden OR fade
-      dropT_[i] = (dropTgt_[i] > 0.5f) ? (18.f + 55.f * dr()) : (25.f + 20.f * dr());   // on 18-73 s, SILENCE 25-45 s
+      dropT_[i] = (dropTgt_[i] > 0.5f) ? (18.f + 55.f * dr()) : (25.f + 20.f * dr());  // on 18-73 s, SILENCE 25-45 s
     }
+    cGate_[i].store(aGate[i] * dropTgt_[i], std::memory_order_relaxed);               // act palette x dropout texture
   }
   // recognizable PD melody: emit the next note ~once per beat; grains gated down so it emerges
   if (melodyOn_) {

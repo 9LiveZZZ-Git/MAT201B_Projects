@@ -33,7 +33,7 @@ class AudioEngine {
   void traceOn(int slot, int node, float pan);
   void traceOff(int slot);
   void whisper(const std::string& word, int node, float pan);
-  void update(float dt, float hesitation, float depth, float progress, float focusPan);
+  void update(float dt, float hesitation, float depth, float progress, float focusPan, int act = 1);
 
   void render(al::AudioIOData& io);
 

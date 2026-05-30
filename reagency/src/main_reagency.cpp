@@ -209,10 +209,10 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       s.navQuat[0] = float(q.x); s.navQuat[1] = float(q.y);
       s.navQuat[2] = float(q.z); s.navQuat[3] = float(q.w);
 
-      // AUDIO continuous controls: hesitation -> timbre/reverb, depth -> bright<->dark morph,
-      // focus point -> stereo localization, progress -> (reserved). Also pumps the arpeggio.
+      // AUDIO continuous controls + the 5-ACT orchestration: each act has its own palette
+      // (I seduction -> II reading -> III extraction grind -> IV bare-pulse turn -> V haunted residue).
       audio_.update(float(dt), s.hesitation, s.depth, conductor.progress(),
-                    panOf(Vec3f(s.focusPos[0], s.focusPos[1], s.focusPos[2])));
+                    panOf(Vec3f(s.focusPos[0], s.focusPos[1], s.focusPos[2])), act);
     } else {
       // apply the primary's exact pose (Quatd is w,x,y,z)
       nav().pos().set(s.navPos[0], s.navPos[1], s.navPos[2]);
@@ -292,6 +292,12 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   // SPACE toggles the manual dive to the core vessel — summon the splats on demand.
   bool onKeyDown(const Keyboard& k) override {
     if (k.key() == ' ') { diveActive_ = !diveActive_; return true; }
+    // audition the 5 acts: keys 1-5 jump the cycle clock to each act's middle (audio + visuals).
+    if (k.key() >= '1' && k.key() <= '5') {
+      static const float ACT_T[5] = {120.f, 285.f, 435.f, 555.f, 720.f};
+      cycleClock_ = ACT_T[k.key() - '1'];
+      return true;
+    }
     return false;
   }
 };
