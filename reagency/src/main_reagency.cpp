@@ -16,6 +16,7 @@
 #include "viz/VesselSplats.hpp"
 #include "viz/HumanTrace.hpp"
 #include "viz/LabelLayer.hpp"
+#include "viz/CaptionLayer.hpp"
 #include "audio/AudioEngine.hpp"
 
 #include <cmath>
@@ -36,6 +37,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   VesselSplats  vessel;
   HumanTrace    trace;
   LabelLayer    labels;
+  CaptionLayer  captions_;                    // v2: the machine's VOICE (me/you/them/us)
   AudioEngine   audio_;                       // primary-only generative voice (M5)
   int           prevCurNode_ = -1;            // arrival edge-detect for audio events
   std::vector<int> heroNodes_;                // corpus image nodes that have an atlas thumbnail
@@ -85,6 +87,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     vessel.init(assetDir);
     trace.init(assetDir);
     labels.init(assetDir);
+    captions_.init(assetDir);                             // v2 voice (v2/captions_atlas.png)
     audio_.init(assetDir, audioIO().framesPerSecond());   // primary-only; scale from manifest.json
     for (int i = 0; i < field.count(); ++i)            // traceable corpus photos
       if (field.typeOf(i) == 0 && field.atlasOf(i) >= 0) heroNodes_.push_back(i);
@@ -171,6 +174,9 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       const float diveTarget = diveActive_ ? 1.f : 0.f;
       diveOverride_ += (diveTarget - diveOverride_) * std::min(1.f, float(dt) * 2.5f);  // ~0.4s ease
       s.depth = actDepth * (1.f - diveOverride_);              // diveOverride_->1 sinks to the core (depth 0)
+
+      // v2 VOICE: advance the machine's me/you/them/us caption schedule for the current act.
+      captions_.update(act, float(dt));
 
       // Camera. A DENSE corpus (the real ~10k) lets us sit INSIDE the cloud and be enveloped;
       // a small preview corpus is too sparse for inside-out (you'd see mostly void), so we
@@ -263,6 +269,13 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
         labels.drawSlot(g, p - camU * 1.4f, camR, camU, labels.slotForNode(s.traceNode[i]), lab, 0.45f);
       }
     }
+
+    // v2 VOICE: the machine's me/you/them/us confession, head-locked in front of the viewer with a
+    // typewriter reveal (the human-authorship mark). Drawn last so it reads over the galaxy.
+    const Vec3f camPos(s.navPos[0], s.navPos[1], s.navPos[2]);
+    Vec3d fwd = q.rotate(Vec3d(0, 0, -1));
+    const Vec3f camFwd(float(fwd.x), float(fwd.y), float(fwd.z));
+    captions_.draw(g, camPos, camFwd, camR, camU);
   }
 
   void onSound(AudioIOData& io) override {
