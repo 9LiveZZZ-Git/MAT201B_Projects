@@ -32,8 +32,8 @@ def umap_3d(E, seed):
     try:
         import umap
         n = min(30, max(5, E.shape[0] - 1))
-        reducer = umap.UMAP(n_components=3, n_neighbors=n, min_dist=0.3,
-                            metric="cosine", random_state=seed)
+        # no random_state -> UMAP uses ALL cores (single-threaded is far too slow at 50k points)
+        reducer = umap.UMAP(n_components=3, n_neighbors=n, min_dist=0.3, metric="cosine")
         return reducer.fit_transform(E).astype(np.float32)
     except Exception as e:
         print("[stage_b] UMAP unavailable (%s); PCA fallback" % e)
@@ -218,6 +218,9 @@ def build_labels(E, meta, cluster_id, coords, atlas_idx, assets, cols=8, cw=256,
     with open(os.path.join(assets, "classify.txt"), "w") as f:   # node slot
         for node, w in img_label.items():
             f.write("%d %d\n" % (node, slot[w]))
+    with open(os.path.join(assets, "label_words.txt"), "w") as f:  # slot word (ALL slots; for audio whisper)
+        for w, s in sorted(slot.items(), key=lambda kv: kv[1]):
+            f.write("%d %s\n" % (s, w))
     print("[stage_b] labels: %d clusters, %d image classifications, %d unique words -> labels_atlas.png"
           % (len(cluster_label), len(img_label), len(slot)))
 
@@ -253,9 +256,13 @@ def main():
             E /= (np.linalg.norm(E, axis=1, keepdims=True) + 1e-9)
             print("[stage_b] modality-centered (bridged the CLIP image/text gap)")
 
-    coords = scale_coords(umap_3d(E, a.seed), a.radius)
+    cpath = os.path.join(a.work, "coords.npy")
+    if os.path.exists(cpath):
+        coords = np.load(cpath); print("[stage_b] loaded cached UMAP coords")
+    else:
+        coords = scale_coords(umap_3d(E, a.seed), a.radius); np.save(cpath, coords)
     edges, density = knn_edges(E, a.k)
-    cluster_id = cluster(E, a.seed)
+    cluster_id = cluster(coords, a.seed)   # cluster on the 3-D layout: fast + visual (1024-d HDBSCAN is intractable at 50k)
     is_word = np.array([m["type"] == "word" for m in meta])
     ptype = is_word.astype(np.float32)
     colors = colorize(cluster_id, density, is_word)
