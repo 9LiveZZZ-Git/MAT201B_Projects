@@ -127,7 +127,7 @@ void LabelLayer::drawClusters(Graphics& g, const Vec3f& camR, const Vec3f& camU,
   if (!ready() || alpha <= 0.f) return;
   g.depthTesting(false); g.blending(true); g.blendTrans();
   for (const auto& c : clusters_)
-    drawCell(g, shader_, tex_, mesh_, c.pos, camR, camU, c.slot, alpha, 0.22f,   // a lot smaller
+    drawCell(g, shader_, tex_, mesh_, c.pos, camR, camU, c.slot, alpha, 0.13f,   // smaller still
              cols_, cw_, ch_, atlasW_, atlasH_);
   g.depthTesting(true);
 }

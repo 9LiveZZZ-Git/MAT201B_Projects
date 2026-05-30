@@ -201,7 +201,7 @@ void AudioEngine::whisper(const std::string& word, int node, float pan) {
   for (int i = 0; i < syl; ++i) vow |= (vidx[i] & 7) << (3 * i);
   float f0, f1, f2; formantForIdx(firstV, f0, f1, f2);
   cFmt0_.store(f0, std::memory_order_relaxed); cFmt1_.store(f1, std::memory_order_relaxed); cFmt2_.store(f2, std::memory_order_relaxed);  // -> talking growl
-  Ev e{}; e.kind = EV_WHISPER; e.layer = 4; e.amp = 0.48f; e.pan = pan; e.islot = syl; e.vow = vow; e.a = f0; e.b = f1; e.c = f2; push(e);
+  Ev e{}; e.kind = EV_WHISPER; e.layer = 4; e.amp = 0.15f; e.pan = pan; e.islot = syl; e.vow = vow; e.a = f0; e.b = f1; e.c = f2; push(e);   // -10 dB
 }
 void AudioEngine::update(float dt, float hesitation, float depth, float progress, float focusPan) {
   if (!ready()) return; depth = clamp01(depth);
@@ -503,7 +503,7 @@ void AudioEngine::render(al::AudioIOData& io) {
         leadL += whisperGate_ * 0.85f * s * cL; leadR += whisperGate_ * 0.85f * s * cR;          // lower
         ppSendL += whisperGate_ * 0.12f * s * cL; ppSendR += whisperGate_ * 0.12f * s * cR; revSend += s * whisperGate_ * 0.7f;   // blend more with the global verb
         sampSend += s * whisperGate_ * 0.6f;                                                     // short MONO reverb on the whisper
-      } else if (v.layer == 9) { leadL += 1.05f * s; leadR += 1.05f * s; }   // "and" tick: dry, centred, un-ducked
+      } else if (v.layer == 9) { leadL += 1.05f * s; leadR += 1.05f * s; ppSendL += 0.4f * s; ppSendR += 0.4f * s; }   // "and" tick: dry + into the ping-pong delay
       else if (v.layer == 6 || v.layer == 7) { lowMono += s; }
       else {
         float pan = v.pan + (v.layer == 2 || v.layer == 8 ? drift : 0.f); float pp = 0.5f * (pan + 1.f); pp = pp < 0 ? 0 : (pp > 1 ? 1 : pp);
