@@ -1,0 +1,49 @@
+# colophon.txt — World of Shadow Work v2 — colophon-as-ledger + program note
+# A debtor-column ledger: it books the makers' OWN supply chain, names the limit out loud,
+# and commits to one real, costly act of redress. Disclosure without redress is decoration.
+#
+# ========================= LEDGER (debtor column) =========================
+# OWED TO                              | FOR                                   | AMOUNT
+# -------------------------------------+---------------------------------------+----------------
+# CC0 public-domain museum collections | the corpus (NOT scraped from workers) | [tbd — list/count]
+# ~140 CC0 audio makers                | the sound bed                         | [tbd — count]
+# Google Colab — A100 GPU              | offline factory: CLIP embeds, bakes   | [ARTIST FILL: real A100 hours]
+# student labor                        | building/running the factory          | [ARTIST FILL: real hours]
+# the artist                           | authorship of the staged "I"          | [ARTIST FILL: real name]
+# the workers in them.txt (THEM)       | the labeling/moderation/RLHF the model rests on | UNPAYABLE HERE
+#
+# Phase-1 voice is HAND-AUTHORED, zero-model. The VLM enrichment is Phase-2, not this spine.
+#
+# ========================= THE LIMIT, NAMED ALOUD =========================
+# This piece makes exploitation beautiful. I cannot solve that from here.
+# We are inconvenienced by knowing. They were harmed by doing. That is not the same.
+#
+# ===================== ONE COSTLY COMMITMENT (template) ===================
+# [ARTIST FILL: $AMOUNT] donated to one of the following verified worker-advocacy orgs:
+#   - Foxglove — London-based tech-justice legal non-profit (CIC), co-founded 2019 by
+#     Martha Dark, Cori Crider & Rosa Curling; backs the Kenyan Sama/Meta moderators'
+#     cases (185 former moderators to trial, Sept 2024). https://www.foxglove.org.uk/
+#   - African Content Moderators Union — first such union in Africa, formed by 150+
+#     workers in Nairobi, 2023-05-01. (Worker-led; support via Foxglove channels.)
+#   - DAIR, the Distributed AI Research Institute — independent AI-ethics research
+#     non-profit founded by Timnit Gebru, launched 2021-12-02. https://www.dair-institute.org/
+#   - Turkopticon — worker-led advocacy for Amazon Mechanical Turk workers; from a 2008
+#     tool by Lilly Irani & M. Six Silberman, worker-run non-profit since 2019.
+#     https://turkopticon.net/
+#
+# ============================ BIBLIOGRAPHY (program note) =================
+# Ivan Illich. Shadow Work. Marion Boyars, 1981. (ISBN 9780714527109.) — coins "shadow work"
+#   for the unpaid servitude a commodity economy demands; the namesake of this piece.
+# Mary L. Gray & Siddharth Suri. Ghost Work: How to Stop Silicon Valley from Building a New
+#   Global Underclass. Houghton Mifflin Harcourt, 2019. (ISBN 9781328566249.) — "ghost work."
+# Kate Crawford. Atlas of AI: Power, Politics, and the Planetary Costs of Artificial
+#   Intelligence. Yale University Press, 2021. (ISBN 9780300209570.) — "AI is neither
+#   artificial nor intelligent... made from natural resources, fuel, human labor..."
+# Antonio A. Casilli. Waiting for Robots: The Hired Hands of Automation. University of
+#   Chicago Press, 2025 (orig. En attendant les robots, Seuil, 2019). — the "travail du clic."
+# Phil Jones. Work Without the Worker: Labour in the Age of Platform Capitalism. Verso,
+#   2021. (ISBN 9781839760433.) — "microwork" for a few cents an hour, Global South.
+# Astra Taylor. "The Automation Charade." Logic(s) Magazine, Issue 5 "Failure," 2018-08-01.
+#   — coins "fauxtomation."
+# Billy Perrigo. "OpenAI Used Kenyan Workers on Less Than $2 Per Hour to Make ChatGPT Less
+#   Toxic." TIME, 2023-01-18. — the load-bearing wage report behind them.txt.

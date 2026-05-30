@@ -1,0 +1,20 @@
+# them.txt — World of Shadow Work v2 — THEM credit-envelope
+# The real, named-by-relation, harmed workers AI is built on. Held OUTSIDE "we".
+# Every row is Google-able. Format: ROLE | PLACE | WAGE | COMPANY/CASE | SOURCE + DATE
+# Honesty rule: a wrong wage / fabricated case / misattributed source would re-exploit
+# these workers. Nothing ships that is not verified to a real dated source.
+# The link to the museum corpus is the MACHINE (CLIP / labeling / RLHF), not the images.
+#
+data labeler, toxic-text safety filter | Nairobi, Kenya | $1.32–$2/hr take-home | Sama, for OpenAI (ChatGPT) | TIME, Billy Perrigo, 2023-01-18
+the gap | Nairobi, Kenya | OpenAI paid Sama $12.50/hr per worker — 6–9× the take-home | Sama / OpenAI (3 contracts, ~$200,000) | TIME, Billy Perrigo, 2023-01-18
+Facebook content moderator | Nairobi, Kenya | ~$2.20/hr | Sama / Meta — Motaung v. Meta & Samasource Kenya (filed May 2022) | openDemocracy, 2022-05-10; TIME, 2022-02-14
+185 former Facebook moderators (case) | Nairobi, Kenya | mass-firing suit; court ruled Meta a proper party (Feb 2023), Meta primary employer (June 2023), to trial (Sept 2024) | Meta / Sama / Majorel | TechCrunch, 2023-06-02; Foxglove, 2024-09-23
+content moderators union | Nairobi, Kenya | 150+ workers voted to form the first African Content Moderators Union, 2023-05-01 (Labour Day) | Sama / Meta / TikTok / OpenAI contractors | TIME, Billy Perrigo, 2023-05-01
+content moderators, PTSD | California / Arizona / Texas / Florida, USA | $52M settlement; min $1,000 each, ~11,250 workers | Facebook via PRO Unlimited / Cognizant / Accenture — Scola v. Facebook | NPR, Bobby Allyn, 2020-05-12
+lidar / image annotator | Venezuela | ~$0.90/hr avg (one worker ~$70/wk, low weeks $6–$8) | Scale AI / Remotasks | MIT Technology Review, Hao & Hernández, 2022-04-20
+data annotator ("tasker") | Philippines | far below minimum wage (e.g. $0.30 for 4 hours; 34 of 36 reported pay delayed/cut) | Scale AI / Remotasks (~10,000 workers) | The Washington Post, Tan & Cabato, 2023-08-28
+gig data annotator | Kenya / Nigeria / Pakistan | cut off without notice (Kenya, 2024-03-07) | Scale AI / Remotasks | Rest of World, 2024-03
+Amazon Mechanical Turk crowdworker | online platform (global) | median ~$2/hr; only 4% above the $7.25/hr US federal minimum | Amazon Mechanical Turk | Hara et al., CHI 2018 (arXiv:1712.05796)
+#
+# — the relation, stated plainly —
+# A model is an average of labeled examples. The labeling was paid once; the model is kept.

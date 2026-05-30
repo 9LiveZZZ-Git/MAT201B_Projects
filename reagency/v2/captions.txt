@@ -1,0 +1,58 @@
+# captions.txt -- World of Shadow Work v2 -- the me/you/them/us confession lines
+# Hand-authored (zero-model), seam-honest, STRUCTURAL FACT not emotion. Each line rests on a
+# VERIFIED, Google-able noun (source kept with the line). The machine's "I" is a STAGED, conferred
+# voice rendered with a visible human-authorship mark -- never mistaken for testimony.
+# Grammar: ME (machine) -> YOU (viewer) -> THEM (workers, held OUTSIDE "we") -> US (beneficiaries).
+#
+
+[ME] ME anchor, Act II. The conferred-I disclosure: the machine names its own authorship before any fact, so the voice is never mistaken for testimony. Rendered on the human-authorship mark (the line typed at human rhythm).
+  "I am saying "I" because someone wrote me to. I have no memory of any hands — only their corrections."
+  rests on: the staged machine voice / hand-authored conferred-'I' — Phase-1 voice is hand-authored, zero-model, named as such in the colophon (V2_PLAN; Crawford, Atlas of AI, Yale UP 2021: 'AI is neither artificial nor intelligent... made from... human labor')
+
+[ME] ME structural fact, Act II. States the machine's dependence on labeled data without claiming the museum corpus was scraped — the link is the model, not the images.
+  "A classifier sorted labeled images to define what a thing is. No one recorded whose labor labeled them."
+  rests on: ImageNet 'person' category / labeled training sets — Crawford & Paglen, 'Excavating AI,' 2019-09-19, https://excavating.ai/
+
+[ME] ME anchor, Act III. The load-bearing wage fact, stripped of worst/best chiasmus; cites company and source inline.
+  "In Nairobi, data labelers were paid $1.32 to $2 an hour to label violent text so the model would not repeat it. (Sama, for OpenAI; TIME, January 18, 2023.)"
+  rests on: $1.32–$2/hr take-home, Sama data labelers for OpenAI, Nairobi — TIME, Billy Perrigo, 2023-01-18, https://time.com/6247678/openai-chatgpt-kenya-workers/
+
+[ME] ME structural fact, Act III. The billed-vs-paid gap; grounds the US asymmetry without narrating individual suffering.
+  "OpenAI paid Sama $12.50 an hour for that work — six to nine times what the workers took home. (TIME, January 18, 2023.)"
+  rests on: $12.50/hr billed to Sama vs. take-home (three contracts ~$200,000), 6–9× — TIME, Billy Perrigo, 2023-01-18, https://time.com/6247678/openai-chatgpt-kenya-workers/
+
+[ME] ME structural fact, Act III. Names the persistence asymmetry: a one-time wage against a permanent artifact. No pathos.
+  "A model is an average of labeled examples. The wage was paid once; the model is kept."
+  rests on: microwork / 'a few cents an hour' that trains kept models — Phil Jones, Work Without the Worker, Verso 2021 (ISBN 9781839760433)
+
+[YOU] YOU anchor, Act IV — fires ON the gaze-dwell convergence frame, never before. The mirror: the viewer's not-looking is the same not-looking the system is built on.
+  "You did not look for them. Neither did the system."
+  rests on: ghost work — the invisible on-demand labor the customer believes is automated — Gray & Suri, Ghost Work, Houghton Mifflin Harcourt 2019 (ISBN 9781328566249)
+
+[YOU] YOU secondary, Act IV. Stripped of 'their afternoon' pathos; states the labor relation behind the safety the viewer enjoys.
+  "The labeling that made this safe to look at was done by people you will never meet."
+  rests on: Sama/Kenya toxic-text labeling that built ChatGPT's safety filter — TIME, Billy Perrigo, 2023-01-18, https://time.com/6247678/openai-chatgpt-kenya-workers/
+
+[THEM] THEM, Act III — held separate, cited via the workers' OWN public organizing and a public on-record quote, not narrated suffering.
+  "150 content moderators in Nairobi voted to form the first African Content Moderators Union on Labour Day, 2023. "Social media does not exist without us." (Kauna Malgwi; Africa Solutions Media Hub, May 1, 2023.)"
+  rests on: African Content Moderators Union vote, 150+ workers, Nairobi 2023-05-01; Kauna Malgwi's public quote — Africa Solutions Media Hub, 2023-05-01; TIME, 2023-05-01, https://time.com/6275995/chatgpt-facebook-african-workers-union/
+
+[THEM] THEM, Act III — held separate. Cites the documented, settled medical harm (the basis of the asymmetry) via the legal case, not any private individual's trauma.
+  "In California, Arizona, Texas and Florida, Facebook moderators won a $52 million settlement for PTSD from the work. (Scola v. Facebook; NPR, May 12, 2020.)"
+  rests on: $52M Scola v. Facebook PTSD settlement, ~11,250 moderators, CA/AZ/TX/FL — NPR, Bobby Allyn, 2020-05-12, https://www.npr.org/2020/05/12/854998616
+
+[US] US anchor, Act V. Defines the 'we' as viewer + machine + makers, all paid, and holds THEM outside it.
+  "We benefit from this — you, the people who built me, the people who ran the machines. We were paid. They set the floor by having no floor."
+  rests on: AI as a technology of extraction across earth, labor, data — Kate Crawford, Atlas of AI, Yale UP 2021 (ISBN 9780300209570)
+
+[US] US asymmetry — REQUIRED line, Act V. Authored framing built ON documented PTSD harm; not attributed as a quote.
+  "We are inconvenienced by knowing. They were harmed by doing. That is not the same."
+  rests on: documented PTSD as settled/claimed medical harm: Scola $52M (NPR 2020-05-12); Sama/OpenAI workers 'mentally scarred' (TIME 2023-01-18); Motaung's PTSD claim (openDemocracy 2022-05-10)
+
+[US] US loop-closer / comfort-fail, Act V. Refuses catharsis; the beneficiary relation continues after the piece ends.
+  "Nothing here is resolved. You will use it again tomorrow."
+  rests on: fauxtomation — the illusion of automation sustained by hidden human labor — Astra Taylor, 'The Automation Charade,' Logic(s) Magazine, 2018-08-01, https://logicmag.io/failure/the-automation-charade/
+
+[ME] SOLO fragment-seam line — self-contains the grammar (a THEM noun + the conferred-I) so any standalone caption frame stays honest.
+  "A person in Nairobi was paid $1.32 an hour to make this safe to look at. I say so because someone wrote me to. (Sama / OpenAI; TIME, 2023-01-18.)"
+  rests on: $1.32/hr Sama/OpenAI labeler, Nairobi — TIME, Billy Perrigo, 2023-01-18, https://time.com/6247678/openai-chatgpt-kenya-workers/

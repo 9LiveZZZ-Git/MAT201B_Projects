@@ -1,0 +1,46 @@
+# lexicon.txt -- World of Shadow Work v2 -- the labor lexicon
+# The historical<->present rhyme + the workers' OWN languages (the THEM nouns, per the artist's
+# choice). Every term is a real, attested word with a source.
+
+## HISTORICAL (19th-c. trade / servitude)
+  weaver — a person who wove cloth on a loom from spun yarn (Family Tree Researchers, Old Occupations)
+  collier — a coal miner (also a charcoal maker in woodland areas) (Family Tree Researchers)
+  laundress — a woman who took in washing and laundered clothes/linen for payment (Family Tree Researchers)
+  charwoman — a part-time/casual cleaner of houses, offices, public buildings (Family Tree Researchers)
+  servant — domestic service was the largest women's wage occupation of 19th-c. Britain; maids-of-all-work worked 14–16 hr days (Helen Wojtczak, The Victorian Web)
+
+## CONTEMPORARY (AI labor, English)
+  data labeler / content moderator — TIME / Sama, 2023-01-18
+  RLHF annotator — Reinforcement Learning from Human Feedback annotation (descriptive compound; RLHF is a standard attested term)
+  ghost work — Gray & Suri, Ghost Work, 2019 (ISBN 9781328566249)
+  fauxtomation — Astra Taylor, 'The Automation Charade,' Logic(s) Magazine, 2018-08-01
+  microwork — Phil Jones, Work Without the Worker, Verso 2021 (ISBN 9781839760433)
+
+## THE RHYME (historical -> present)
+  weaver -> data labeler
+  collier -> lidar / image annotator
+  laundress -> content moderator
+  charwoman -> tasker (microwork cleanup)
+  servant -> ghost worker
+
+## THE WORKERS' OWN LANGUAGES (THEM nouns -- present, not just English-about-them)
+  kazi [Swahili (Kenya)] = work / labour (Wiktionary; Glosbe)
+  mfanyakazi [Swahili (Kenya)] = worker (pl. wafanyakazi; 'one who does work') (Wiktionary, https://en.wiktionary.org/wiki/mfanyakazi)
+  kibarua [Swahili (Kenya)] = casual / day labourer; a temporary task-job (Wiktionary, https://en.wiktionary.org/wiki/kibarua)
+  mfumaji [Swahili (Kenya)] = weaver (pl. wafumaji; from -fuma, to weave/knit) (Wiktionary)
+  haki [Swahili (Kenya)] = rights / justice (Glosbe)
+  chama [Swahili (Kenya)] = association / union (chama cha wafanyakazi = workers' union) (Glosbe)
+  trabajo [Spanish (Venezuela)] = work / job (RAE, dle.rae.es)
+  trabajador [Spanish (Venezuela)] = worker (RAE; SpanishDict, https://en.wiktionary.org/wiki/trabajador)
+  obrero [Spanish (Venezuela)] = manual / industrial labourer (RAE; SpanishDict)
+  tejedor [Spanish (Venezuela)] = weaver (RAE; Cambridge)
+  minero [Spanish (Venezuela)] = miner (RAE)
+  sirviente [Spanish (Venezuela)] = servant (RAE)
+  jornal [Spanish (Venezuela)] = day-wage (RAE)
+  sindicato [Spanish (Venezuela)] = labour union (RAE)
+  trabaho [Tagalog / Filipino (Philippines)] = work / job (from Spanish trabajo) (Wiktionary, https://en.wiktionary.org/wiki/trabaho)
+  manggagawa [Tagalog / Filipino (Philippines)] = worker / laborer (root gawa = work) (Tagalog.com, https://www.tagalog.com/dictionary/manggagawa)
+  paggawa [Tagalog / Filipino (Philippines)] = labor / work / making (TagalogLang)
+  trabahador [Tagalog / Filipino (Philippines)] = worker (from Spanish trabajador) (Tagalog.com)
+  sahod [Tagalog / Filipino (Philippines)] = wages (U.S. DOL Tagalog migrant-worker materials)
+  unyon [Tagalog / Filipino (Philippines)] = union (U.S. DOL Tagalog migrant-worker materials)
