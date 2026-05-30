@@ -84,7 +84,7 @@ bool StoryLayer::init(const std::string& assetDir) {
   for (const auto& c : candidates)
     if (loadAtlas(c)) { tex_ok_ = true;
       std::fprintf(stderr, "[wosw] story atlas loaded from %s\n", c.c_str()); break; }
-  if (tex_ok_) loadPos(assetDir);
+  if (tex_ok_) { cols_ = atlasW_ / cw_; if (cols_ < 1) cols_ = 1; loadPos(assetDir); }
   else std::fprintf(stderr, "[wosw] stories_atlas.png not found — galaxy stories off (bake v2/bake_stories.py)\n");
   shader_ok_ = shader_.compile(kVert, kFrag);
   std::fprintf(stderr, "[wosw] galaxy stories: %zu in the cloud\n", stories_.size());
@@ -110,7 +110,8 @@ void StoryLayer::draw(Graphics& g, const Vec3f& camPos, const Vec3f& camRight,
 
     g.shader().uniform("uEra", float(s.era));
     for (int i = 0; i < s.numLines; ++i) {
-      const int row = s.startRow + i;
+      const int idx = s.startRow + i;                  // flat cell index -> grid (col,row)
+      const int col = idx % cols_, row = idx / cols_;
       // stack lines above the point (top line first), so the block reads downward
       const float yo = (float(s.numLines - 1) * 0.5f - float(i)) * LINEH;
       const Vec3f c  = s.pos + camUp * yo;
@@ -121,9 +122,10 @@ void StoryLayer::draw(Graphics& g, const Vec3f& camPos, const Vec3f& camRight,
       mesh_.vertex(TL.x, TL.y, TL.z); mesh_.texCoord(0.f, 0.f);
       mesh_.vertex(TR.x, TR.y, TR.z); mesh_.texCoord(1.f, 0.f);
       mesh_.update();
+      const float u0 = float(col * cw_) / atlasW_, u1 = float((col + 1) * cw_) / atlasW_;
       const float v0 = 1.f - float((row + 1) * ch_) / atlasH_;
       const float v1 = 1.f - float(row * ch_) / atlasH_;
-      g.shader().uniform("uUV", Vec4f(0.f, v0, 1.f, v1));
+      g.shader().uniform("uUV", Vec4f(u0, v0, u1, v1));
       g.shader().uniform("uAlpha", a);
       g.draw(mesh_);
     }

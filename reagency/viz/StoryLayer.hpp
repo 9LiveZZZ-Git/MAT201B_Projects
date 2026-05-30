@@ -30,7 +30,7 @@ struct StoryLayer {
   al::ShaderProgram shader_;
   al::VAOMesh       mesh_;
   bool tex_ok_ = false, shader_ok_ = false;
-  int  atlasW_ = 1, atlasH_ = 1, ch_ = 56;
+  int  atlasW_ = 1, atlasH_ = 1, ch_ = 56, cw_ = 980, cols_ = 1;  // grid atlas (cw_ must match bake)
 
   bool loadAtlas(const std::string& path);
   void loadPos(const std::string& assetDir);

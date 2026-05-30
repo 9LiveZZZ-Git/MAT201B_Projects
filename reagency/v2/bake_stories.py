@@ -87,11 +87,15 @@ cells = []   # (storyId, era, text)
 for sid, (ol, era) in enumerate(stories):
     for wl in wrap(ol, CW - 2*PAD):
         cells.append((sid, era, wl))
+import math
 N = len(cells)
-atlas = Image.new("RGBA", (CW, CH*N), (0,0,0,0))
+COLS = min(8, max(1, math.ceil(N / 140)))     # grid-pack so the atlas stays under the GPU max (~8192)
+ROWS = math.ceil(N / COLS)
+atlas = Image.new("RGBA", (CW*COLS, CH*ROWS), (0,0,0,0))
 draw = ImageDraw.Draw(atlas)
-for row, (sid, era, text) in enumerate(cells):
-    draw.text((PAD, row*CH + (CH-FS)//2 - 2), text, font=font, fill=(236, 232, 224, 255))
+for idx, (sid, era, text) in enumerate(cells):     # idx is the FLAT cell index; runtime maps -> (col,row)
+    col, row = idx % COLS, idx // COLS
+    draw.text((col*CW + PAD, row*CH + (CH-FS)//2 - 2), text, font=font, fill=(236, 232, 224, 255))
 atlas.save(os.path.join(HERE, "stories_atlas.png"))
 
 with open(os.path.join(HERE, "stories_pos.txt"), "w") as f:
@@ -104,5 +108,6 @@ with open(os.path.join(HERE, "stories_pos.txt"), "w") as f:
         row += k
 
 print("source:", src, "| font:", fontname)
-print("stories:", len(stories), "| line-cells:", N, "| atlas: %dx%d" % (CW, CH*N))
+print("stories:", len(stories), "| line-cells:", N, "| grid: %dcols x %drows | atlas: %dx%d"
+      % (COLS, ROWS, CW*COLS, CH*ROWS))
 print("wrote stories_atlas.png + stories_pos.txt to", HERE)
