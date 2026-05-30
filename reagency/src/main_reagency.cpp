@@ -42,13 +42,33 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   int           heroCursor_ = 0;
   float         traceTimer_ = 0.f;
   static constexpr float TRACE_LIFE  = 9.0f;  // seconds a surfaced photo lives (lingers)
-  static constexpr float TRACE_EVERY = 6.0f;  // cadence between new photos (calm, ~rotation-paced)
-  // Depth crossfade: a slow autonomous "tide" between the galaxy (home) and a descent to the
-  // core vessel. depthPhase_ advances in time but SLOWS when the machine hesitates, so the
-  // descent breathes with the mind. Dwells longer in the galaxy; dips fully to the vessel once
-  // per period. depth: 1 = galaxy out among the points, 0 = sunk into the core vessel shell.
-  float         depthPhase_ = 0.f;
-  static constexpr float DEPTH_PERIOD = 80.0f;  // seconds for a full galaxy->vessel->galaxy tide
+  // ----- v2 5-ACT NARRATIVE RE-SCORE -----
+  // A ~14-min ritual cycle replaces the old 80s cos() tide. cycleClock_ advances with time but
+  // SLOWS when the machine hesitates, so the ritual breathes with the mind. cycleT in [0,CYCLE)
+  // maps to a piecewise depth envelope across the acts: I seduction -> II reading -> III extraction
+  // -> IV turn (floor 0.10, the plunge) -> V integration. The COMFORT FAILS: Act V re-brightens only
+  // partway (~0.50), never back to the Act-I seduction; the loop seam is continuous (V end == I
+  // start) so it never hard-resets. depth: 1 = galaxy out among the points, 0 = sunk into the core.
+  static constexpr float CYCLE = 840.f;
+  float         cycleClock_ = 0.f;
+  static float actEnvelope(float t, int& act) {            // depth(t) + act index (1..5)
+    struct KF { float t, d; };
+    static const KF kf[] = {
+      {  0.f, 0.50f}, {120.f, 0.95f}, {210.f, 0.90f}, {360.f, 0.60f},
+      {510.f, 0.15f}, {600.f, 0.10f}, {720.f, 0.30f}, {840.f, 0.50f},
+    };
+    act = (t < 210.f) ? 1 : (t < 360.f) ? 2 : (t < 510.f) ? 3 : (t < 600.f) ? 4 : 5;
+    for (int i = 0; i < 7; ++i)
+      if (t >= kf[i].t && t <= kf[i + 1].t) {
+        float u = (t - kf[i].t) / (kf[i + 1].t - kf[i].t);
+        u = u * u * (3.f - 2.f * u);                        // smoothstep
+        return kf[i].d + (kf[i + 1].d - kf[i].d) * u;
+      }
+    return 0.50f;
+  }
+  static float actTraceEvery(int act) {                    // the cede accelerates in extraction/turn
+    switch (act) { case 3: return 3.0f; case 4: return 2.0f; case 5: return 5.0f; default: return 6.0f; }
+  }
   // Manual dive: SPACE toggles a descent straight to the core vessel (depth->0), overriding the
   // tide so the splat "vessel" can be summoned on demand (demo/verify; also the seed of the
   // Act-IV plunge). Eases in/out for a smooth, reversible plunge.
@@ -102,6 +122,12 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       s.focusPos[0] = focus.x; s.focusPos[1] = focus.y; s.focusPos[2] = focus.z;
       s.vesselKf   = float(conductor.visits()) + conductor.progress();
 
+      // v2 5-act re-score: advance the cycle clock (slowed by hesitation), read the act + depth.
+      // Everything below (trace cadence, the depth crossfade, the dive) subordinates to this.
+      cycleClock_ += float(dt) * (1.f - 0.4f * s.hesitation);
+      const float cycleT = std::fmod(cycleClock_, CYCLE);
+      int act; const float actDepth = actEnvelope(cycleT, act);   // act 1..5; depth 1=galaxy..0=core
+
       // AUDIO: on each NEW node arrival, sound the node's note + ignite an arpeggio over its
       // k-NN edges (the web "belongs-together" made audible). Pitch/timbre from type/density.
       if (s.curNode != prevCurNode_ && s.curNode >= 0) {
@@ -121,7 +147,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
           if (s.traceAge[i] > TRACE_LIFE) { audio_.traceOff(i); s.traceNode[i] = -1; }
         }
       traceTimer_ += float(dt);
-      if (!heroNodes_.empty() && traceTimer_ > TRACE_EVERY) {
+      if (!heroNodes_.empty() && traceTimer_ > actTraceEvery(act)) {
         traceTimer_ = 0.f;
         const int node = heroNodes_[(heroCursor_++) % int(heroNodes_.size())];
         int freeSlot = -1, oldest = 0;
@@ -140,16 +166,11 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
         audio_.whisper(labels.wordForNode(node), node, tpan);
       }
 
-      // Depth tide: advance the phase, slowed by hesitation; map to depth that dwells near the
-      // galaxy (1) and dips to the vessel (0) once per period (pow<1 biases time toward 1).
-      depthPhase_ += float(dt) * (1.f - 0.4f * s.hesitation) / DEPTH_PERIOD;
-      const float u   = depthPhase_ * 6.2831853f;
-      const float raw = 0.5f - 0.5f * std::cos(u);          // 0..1, starts at vessel
-      const float tideDepth = std::pow(raw, 0.6f);            // dwell longer in the galaxy
-      // Manual dive override: ease toward the core when active (SPACE), back to the tide when not.
+      // Manual dive override (SPACE): ease toward the core, layered on the 5-act depth envelope
+      // (actDepth, computed above). Single writer of s.depth.
       const float diveTarget = diveActive_ ? 1.f : 0.f;
       diveOverride_ += (diveTarget - diveOverride_) * std::min(1.f, float(dt) * 2.5f);  // ~0.4s ease
-      s.depth = tideDepth * (1.f - diveOverride_);            // diveOverride_->1 sinks to the vessel (depth 0)
+      s.depth = actDepth * (1.f - diveOverride_);              // diveOverride_->1 sinks to the core (depth 0)
 
       // Camera. A DENSE corpus (the real ~10k) lets us sit INSIDE the cloud and be enveloped;
       // a small preview corpus is too sparse for inside-out (you'd see mostly void), so we
