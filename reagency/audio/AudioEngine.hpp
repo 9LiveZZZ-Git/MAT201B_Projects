@@ -1,7 +1,7 @@
 #pragma once
 // AudioEngine (v3.2) — World of Shadow Work generative score.
 //
-// Mix: the WORD-WHISPER is the lead (blended, ducks the bed AND the low end); a KICK + a Risset
+// Mix: the WORD-WHISPER is the lead (sits on top at its own gain — NO bed/low-end ducking); a KICK + a Risset
 // eternal-accelerando tick layer + a pitched-TIMPANI 2nd Euclidean line carry a varied,
 // never-4/4 rhythm; everything else (moving JI drone, melody, grains, Shepard) is a quiet bed.
 // Master tilts toward a pink reference (+10 dB <300 Hz shelf + HF roll-off). Every onset gets a
@@ -276,7 +276,7 @@ class AudioEngine {
   // only when capRms_>threshold (crush/micro-gate operate on the full master bus, which always has material).
   float crushPh_ = 0.f, microGate_ = 1.f, microGateTgt_ = 1.f, stutPlay_ = 0.f, capRms_ = 0.f;
   int   stutOrigin_ = 0, freezeHold_ = 0, crushBits_ = 0;
-  float duckGain_ = 1.f, lowDuck_ = 1.f, kickDuck_ = 1.f;   // bed + low-end duck under whisper; sub sidechain vs kick
+  float kickDuck_ = 1.f;   // sub-bass sidechain vs the kick (voice ducking removed: bed/low no longer dip under voices)
   // arrangement gates (glided) + dubstep growl LFO/filter + ping-pong delay (grains+whispers)
   float growl_ = 0.f, gate_[NGATE] = {};               // smoothed per-element dropout gates (audio)
   float wobPhase_ = 0.f, growlLp_ = 0.f, growlBp_ = 0.f, wobMult_ = 1.f, wobChange_ = 0.f;
