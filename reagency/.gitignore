@@ -20,10 +20,9 @@ factory/*.zip
 !assets/
 !assets/**
 
-# EXCEPTION: vessel.wswv is large (~57 MB) and regenerable from factory/ (LGM image-to-3D),
-# distributed via the Colab asset zip — keep it OUT of git (it would trip GitHub's >50 MB
-# warning). This re-exclusion must come AFTER the !assets/** re-include to win (last match).
-assets/vessel.wswv
+# vessel.wswv (~57 MB) + v2/emergence_atlas.png (~160 MB) are TRACKED VIA git-lfs (see
+# .gitattributes) so a clone-and-run gets the splat vessel + "watch it think" frames.
+# Clones MUST run `git lfs install` first, or they get pointer files instead of the assets.
 
 # v2 Phase-2 dreams: the raw dream PNGs + emergence frames (~92 MB) come from the Qwen Colab run
 # and are regenerable (re-download + bake) — keep them OUT of git. The galaxy itself (points.bin/
@@ -34,10 +33,7 @@ assets/dreams/
 assets_preview_877/
 assets_pre_qwen_*/
 
-# Baked dream/emergence atlases: regenerable locally via v2/bake_dreams.py + v2/bake_emergence.py.
-# emergence_atlas.png (~29 MB) is too big for git; the small credits_atlas + the *_index/_pos txt
-# (the source-of-truth metadata) and dream_atlas.png stay tracked.
-v2/emergence_atlas.png
+# Baked dream/emergence atlases: regenerable via v2/bake_dreams.py + v2/bake_emergence.py.
+# dream_atlas.png is tracked normally; emergence_atlas.png (~160 MB) is tracked via git-lfs.
 
-# Phase-2 2a voice WAVs — regenerable via v2/bake_voices.py (macOS say), not committed
-assets/audio/voice_*.wav
+# Phase-2 2a voice WAVs — now committed (regenerable via v2/bake_voices.py, macOS say).
