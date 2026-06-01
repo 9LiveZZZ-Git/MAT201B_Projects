@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 project(reagency CXX)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 14)   # AlloSphere toolchain does NOT support C++17 — whole project is C++14 (matches allolib)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --------------------------------------------------------------------------

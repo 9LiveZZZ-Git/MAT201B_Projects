@@ -42,9 +42,9 @@ if(NOT TARGET reagency_support)
         "${al_path}/external/Gamma"
     )
     set_target_properties(reagency_support PROPERTIES
-        CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+        CXX_STANDARD 14 CXX_STANDARD_REQUIRED ON)
     target_link_libraries(reagency_support PUBLIC al)
 endif()
 
 set(app_link_libs reagency_support)
-set(app_compile_flags -std=c++17)
+set(app_compile_flags -std=c++14)   # AlloSphere toolchain has no C++17; build the whole project as C++14 (allolib is C++14)

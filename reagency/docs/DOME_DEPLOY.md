@@ -69,7 +69,8 @@ md5sum assets/points.bin assets/edges.bin assets/atlas_0.png assets/vessel.wswv 
        v2/dream_atlas.png v2/emergence_atlas.png   # compare across machines
 ```
 
-**4. Install build prerequisites on each Linux node:** `cmake >= 3.24`, a C++17 compiler,
+**4. Install build prerequisites on each Linux node:** `cmake >= 3.24`, a C++14 compiler (the
+whole project is **C++14** — the AlloSphere toolchain has no C++17; allolib is C++14 too),
 and allolib's transitive dev packages (GL / X11 / ALSA). Audio runs only on the primary.
 
 **5. Build once per node.** Preferred (passes an absolute assets path → CWD-independent):
