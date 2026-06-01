@@ -516,7 +516,10 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
     if (dropT_[i] <= 0.f) {
       bool on = dropTgt_[i] > 0.5f;
       dropTgt_[i] = on ? (dr() < 0.20f ? 0.f : 1.f) : 1.f;                            // ~20% chance an ON element drops
-      cGateTau_[i].store((dr() < 0.45f) ? (0.012f + 0.03f * dr()) : (1.2f + 3.0f * dr()), std::memory_order_relaxed);  // sudden OR fade
+      // EXIT (drop to silence) always RAMPS gently (1.8-5 s) so stops don't snap; an entrance may snap in or fade.
+      cGateTau_[i].store((dropTgt_[i] < 0.5f) ? (1.8f + 3.2f * dr())
+                                              : ((dr() < 0.45f) ? (0.012f + 0.03f * dr()) : (1.2f + 3.0f * dr())),
+                         std::memory_order_relaxed);
       dropT_[i] = (dropTgt_[i] > 0.5f) ? (18.f + 55.f * dr()) : (25.f + 20.f * dr());  // on 18-73 s, SILENCE 25-45 s
     }
     cGate_[i].store(aGate[i] * dropTgt_[i], std::memory_order_relaxed);               // act palette x dropout texture
