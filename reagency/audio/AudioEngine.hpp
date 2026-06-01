@@ -81,6 +81,18 @@ class AudioEngine {
   enum { G_DRONE, G_WHISPER, G_GRAIN, G_KICK, G_BASS, G_MEL, G_BELL, G_TIMP, NGATE };
   std::array<std::atomic<float>, NGATE> cGate_, cGateTau_;   // target + glide time-constant (fade vs sudden)
   std::atomic<float> cFmt0_{500.f}, cFmt1_{1500.f}, cFmt2_{2500.f};   // formants of the last whispered word
+  // ---------- AVANT-GARDE controls (sim -> audio) ----------
+  static constexpr int PADN = 8;                                      // spectral drone: 8 partials (was 4)
+  std::atomic<float> cSpectrum_[PADN];                               // per-partial TARGET ratio (harmonic<->inharmonic)
+  std::atomic<float> cBeat_{0.f};                                    // difference-tone detune (audible beating/roughness)
+  std::atomic<float> cTopCut_{0.f};                                  // V: fade the upper partials -> detuned ghost
+  std::atomic<float> cCloudLam_{6.f}, cCloudSpread_{0.f}, cQuant_{1.f};   // Xenakis grain cloud: rate, gliss span, quantize
+  std::atomic<float> cGranDens_{0.f}, cGranSize_{0.06f}, cGranScat_{0.f}, cGranRev_{0.f}, cGranPitch_{0.f};  // whisper granulator
+  std::atomic<float> cCut_{1.f}, cFreeze_{0.f};                      // IV TURN: structural CUT to silence + reverb freeze
+  // STORY SPINE (THEM: one named worker per phrase) + CC0 sample CHOIR (US: comfort atop their voice)
+  std::atomic<float> cStoryDeg_{7.f}, cCostBeat_{0.f};               // worker year->register, wage->difference-tone roughness
+  std::atomic<float> cChoir_{0.f}, cChoirLam_{0.f};                  // washed granular sample-choir amp + density
+  std::atomic<float> cSparsity_{0.6f};                              // Eno loop gating: higher = fewer loops survive
 
   // ---------- sim-side state ----------
   std::vector<std::pair<float, int>> mel_;
@@ -97,6 +109,13 @@ class AudioEngine {
   int         section_ = 0, melTune_ = 0, melNote_ = 0; bool melodyOn_ = false; float melNoteTimer_ = 0.f;
   float       dropT_[NGATE] = {}, dropTgt_[NGATE] = {1, 1, 1, 1, 1, 1, 1, 1};   // per-element dropout scheduler
   uint32_t    dprng_ = 0xDEADBEEFu;
+  int         lastActEdge_ = 1; float cutHold_ = 0.f;   // detect the III->IV edge; hold the cut ~0.35 s
+  // loaded labor stories: each phrase pops one (the THEM spine)
+  struct Story { float yearN = 0.5f, costN = 0.5f; int era = 0; };
+  std::vector<Story> stories_;
+  std::size_t storyIdx_ = 0; float phraseT_ = 0.f; int phraseIdx_ = 0;
+  void loadStories(const std::string& assetDir);
+  float       actElapsed_ = 0.f; int prevConductAct_ = 1;   // within-section build (evolve, not slam)
 
   // ---------- audio-side voices ----------
   struct Voice {
@@ -118,9 +137,19 @@ class AudioEngine {
   float tickVoice(Voice& v, float isr, float depth, float bright);
 
   // ---------- always-on layers ----------
-  static constexpr int PADN = 4;
-  float padHz_[PADN] = {220, 330, 440, 550}, padPhase_[PADN] = {}, padVib_[PADN] = {}, padLp_[PADN] = {}, padAmp_[PADN] = {};
+  // PADN now declared with the avant-garde controls above (8 partials).
+  float padHz_[PADN] = {}, padPhase_[PADN] = {}, padVib_[PADN] = {}, padLp_[PADN] = {}, padAmp_[PADN] = {};
   float padTrem_[PADN] = {}, padDrift_[PADN] = {}, padHp_[PADN] = {};   // moving-drone LFOs + high-pass (off the sub-bass)
+  float padBeatPh_[PADN] = {}, padRatioCur_[PADN] = {1,2,3,4,5,6,7,8};  // beating LFO phase + glided per-partial ratio
+  // spectral granulator capture ring (audio-thread only) + glided cut/freeze
+  static constexpr int CAPN = 1 << 16;
+  std::array<float, CAPN> cap_{}; int capPos_ = 0; float granTimer_ = 0.f, cut_ = 1.f, freeze_ = 0.f;
+  float choirTimer_ = 0.f;                             // Poisson clock for the sample choir
+  // Eno generative loops: 8 coprime Fibonacci-length step-loops that phase against each other (never repeat
+  // in 14 min). loopStep_ advances one per beat; loop fires when its step wraps, gated by cSparsity_.
+  static constexpr int NLOOP = 8;
+  int loopStep_[NLOOP] = {0, 1, 2, 3, 4, 5, 6, 7};     // staggered starts so they don't all hit the downbeat
+  void fireLoop(int L);
   float triPhase_ = 0.f, triHz_ = 55.f;                // pure mono triangle SUB-BASS
   float beatPhase_ = 0.f;
   float subPhase_ = 0.f, subAmp_ = 0.f, subLp_ = 0.f, subHz_ = 55.f;

@@ -17,11 +17,15 @@ uniform mat4 al_ProjectionMatrix;
 uniform float uPointSize;
 layout (location = 0) in vec3 vertexPosition;
 layout (location = 1) in vec4 vertexColor;   // rgb + alpha
+layout (location = 2) in vec2 vertexTexCoord; // x = sigma (unused here), y = type (0 image, 1 word)
 out vec4 vcol;
+out float vType;
 void main() {
   vcol = vertexColor;
+  vType = vertexTexCoord.y;
   gl_Position = al_ProjectionMatrix * al_ModelViewMatrix * vec4(vertexPosition, 1.0);
-  gl_PointSize = uPointSize;
+  // T6: word-points (type==1) get a tighter sprite — a legible dot, not a wide bloom.
+  gl_PointSize = uPointSize * mix(1.0, 0.45, step(0.5, vType));
 }
 )GLSL";
 
@@ -31,19 +35,29 @@ void main() {
 static const char* kFrag = R"GLSL(
 #version 330
 in vec4 vcol;
+in float vType;            // 0 = image (bloom), 1 = word (tight legible dot)
 out vec4 fragColor;
 uniform float uCore;       // bright-center sigma (small)
 uniform float uHalo;       // glow sigma (wide)
 uniform float uHaloStr;    // glow strength
 uniform float uIntensity;  // overall brightness
+uniform float uPosterize;  // v2 T10: 0 = off; >0 quantizes color (the Act-V haunt residue)
 void main() {
   vec2 c = gl_PointCoord * 2.0 - 1.0;
   float r2 = dot(c, c);
   if (r2 > 1.0) discard;
-  float core = exp(-r2 / (2.0 * uCore * uCore));
+  float isWord = step(0.5, vType);
+  // T6 legible word-modality: type==1 gets a SHARP, high-contrast, NON-HUE cool-white dot
+  // (no wide halo) so the labor lexicon reads amid the image bloom — washout/color-blind safe.
+  // Images keep the bright-core + soft-halo bloom unchanged.
+  float coreSig = mix(uCore, uCore * 0.55, isWord);
+  float core = exp(-r2 / (2.0 * coreSig * coreSig));
   float halo = exp(-r2 / (2.0 * uHalo * uHalo));
-  float i = core + uHaloStr * halo;
-  fragColor = vec4(vcol.rgb * uIntensity, vcol.a * i);   // additive blend in draw()
+  float i = core + (1.0 - isWord) * uHaloStr * halo;
+  vec3 rgb = mix(vcol.rgb, vec3(0.92, 0.93, 0.97), isWord) * uIntensity;
+  // T10 haunt residue: quantize the palette once the turn has been reached (monotonic on the host)
+  if (uPosterize > 0.001) { float lv = mix(255.0, 32.0, clamp(uPosterize, 0.0, 1.0)); rgb = floor(rgb * lv) / lv; }
+  fragColor = vec4(rgb, vcol.a * i);   // additive blend in draw()
 }
 )GLSL";
 
@@ -122,7 +136,7 @@ void ParticleField::buildMesh() {
     float a = 0.30f + 0.65f * s.density;  // brighter base for AlloSphere washout
     mesh_.vertex(s.pos.x, s.pos.y, s.pos.z);
     mesh_.color(s.col.x, s.col.y, s.col.z, a);
-    mesh_.texCoord(s.sigma, 0.f);
+    mesh_.texCoord(s.sigma, float(s.type));   // T6: y carries point type (0 image, 1 word) to the shader
   }
   mesh_.update();
 }
@@ -153,7 +167,7 @@ bool ParticleField::init(const std::string& assetDir) {
   return shader_ok_;
 }
 
-void ParticleField::draw(Graphics& g, float pointScale, float bright) {
+void ParticleField::draw(Graphics& g, float pointScale, float bright, float posterize) {
   if (!shader_ok_) return;
   g.depthTesting(false);          // additive galaxy: order-independent, no depth write
   g.blending(true);
@@ -164,6 +178,7 @@ void ParticleField::draw(Graphics& g, float pointScale, float bright) {
   g.shader().uniform("uHalo",      halo_sigma_);
   g.shader().uniform("uHaloStr",   halo_strength_);
   g.shader().uniform("uIntensity", intensity_ * bright);
+  g.shader().uniform("uPosterize", posterize);          // T10 haunt residue (0 = off)
   g.pointSize(point_size_ * pointScale);  // fallback for drivers ignoring gl_PointSize
   g.draw(mesh_);
   g.blendTrans();

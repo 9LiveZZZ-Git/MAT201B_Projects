@@ -26,6 +26,10 @@ set(_reagency_lib_srcs
     "${REAGENCY_ROOT}/viz/LabelLayer.cpp"
     "${REAGENCY_ROOT}/viz/CaptionLayer.cpp"
     "${REAGENCY_ROOT}/viz/StoryLayer.cpp"
+    "${REAGENCY_ROOT}/viz/CreditLayer.cpp"
+    "${REAGENCY_ROOT}/viz/DreamLayer.cpp"
+    "${REAGENCY_ROOT}/viz/EmergencePlayer.cpp"
+    "${REAGENCY_ROOT}/viz/DetectionHUD.cpp"
     "${REAGENCY_ROOT}/core/Conductor.cpp"
     "${REAGENCY_ROOT}/audio/AudioEngine.cpp"
 )

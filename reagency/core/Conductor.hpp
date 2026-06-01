@@ -37,7 +37,7 @@ struct Conductor {
   int   cur_ = 0, next_ = 0;
   long  visits_ = 0;
   float t_ = 0.f;            // 0..1 progress from cur_ to next_
-  float speed_ = 0.35f;      // base traversal speed
+  float speed_ = 0.75f;      // base traversal speed (v2: faster so the walk visibly progresses)
   float hesitation_ = 0.f;
 
   void chooseNext();

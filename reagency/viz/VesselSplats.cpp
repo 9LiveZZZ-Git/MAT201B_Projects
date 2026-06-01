@@ -38,6 +38,8 @@ uniform float uHalo;
 uniform float uHaloStr;
 uniform float uIntensity;
 uniform float uAlpha;
+uniform vec3  uTint;       // distinct vessel hue (set the cloud apart from the web/galaxy)
+uniform float uTintAmt;    // 0 = keep baked colour, 1 = full tint
 void main() {
   vec2 c = gl_PointCoord * 2.0 - 1.0;
   float r2 = dot(c, c);
@@ -45,7 +47,8 @@ void main() {
   float core = exp(-r2 / (2.0 * uCore * uCore));
   float halo = exp(-r2 / (2.0 * uHalo * uHalo));
   float i = core + uHaloStr * halo;
-  fragColor = vec4(vcol.rgb * uIntensity, vcol.a * i * uAlpha);
+  vec3 rgb = mix(vcol.rgb, uTint, uTintAmt);
+  fragColor = vec4(rgb * uIntensity, vcol.a * i * uAlpha);
 }
 )GLSL";
 
@@ -163,22 +166,35 @@ void VesselSplats::update(float kfFloat, float time) {
   float melt = 1.f - std::abs(2.f * t - 1.f);    // tent, peaks at t=0.5
   const auto& a = kf_[A];
   const auto& b = kf_[B];
+  // procedural densification: each baked gaussian spawns DENS splats — the center plus jittered
+  // satellites filling the gaussian's own sigma volume, so the sparse (~2.7k) cloud reads dense.
+  static constexpr int DENS = 160;  // v2: ~100x the baked gaussian count -> a dense, READABLE solid body
+  auto jhash = [](int n) { float x = std::sin(float(n) * 12.9898f) * 43758.5453f; return x - std::floor(x); };
   mesh_.reset();
   mesh_.primitive(Mesh::POINTS);
+  mesh_.vertices().reserve(G_ * DENS);
   for (int i = 0; i < G_; ++i) {
-    Vec3f p = a[i].pos + (b[i].pos - a[i].pos) * ts;
-    // smoky melt: curl-ish value-noise displacement, strongest mid-morph
-    Vec3f q = p * 3.5f + Vec3f(0, 0, time * 0.5f);
+    Vec3f p0 = a[i].pos + (b[i].pos - a[i].pos) * ts;
+    // smoky melt: curl-ish value-noise displacement, strongest mid-morph. Computed ONCE per
+    // gaussian and shared by its satellites — keeps the noise budget flat as DENS scales.
+    Vec3f q = p0 * 3.5f + Vec3f(0, 0, time * 0.5f);
     Vec3f disp(vnoise(q + Vec3f(11,0,0)) - 0.5f,
                vnoise(q + Vec3f(0,17,0)) - 0.5f,
                vnoise(q + Vec3f(0,0,23)) - 0.5f);
-    p += disp * (melt * 0.35f);
-    Vec3f col = a[i].rgb + (b[i].rgb - a[i].rgb) * t;
-    float op  = (a[i].opacity + (b[i].opacity - a[i].opacity) * t) * (1.f - 0.5f * melt);
-    float sg  = (a[i].sigma   + (b[i].sigma   - a[i].sigma)   * t) * (1.f + 1.2f * melt);
-    mesh_.vertex(p.x, p.y, p.z);
-    mesh_.color(col.x, col.y, col.z, op);
-    mesh_.texCoord(std::min(3.f, sg / 0.5f), 0.f);   // size factor (melt swells the splats)
+    p0 += disp * (melt * 0.35f);
+    const Vec3f col = a[i].rgb + (b[i].rgb - a[i].rgb) * t;
+    const float op  = (a[i].opacity + (b[i].opacity - a[i].opacity) * t) * (1.f - 0.5f * melt);
+    const float sg  = (a[i].sigma   + (b[i].sigma   - a[i].sigma)   * t) * (1.f + 1.2f * melt);
+    for (int d = 0; d < DENS; ++d) {
+      Vec3f p = p0;
+      if (d > 0) {   // satellite: deterministic offset filling the splat's neighbourhood (identical on every dome node)
+        const int s = i * 131 + d * 977;
+        p += Vec3f(jhash(s) - 0.5f, jhash(s + 1) - 0.5f, jhash(s + 2) - 0.5f) * (sg * 1.0f);  // tighter -> denser
+      }
+      mesh_.vertex(p.x, p.y, p.z);
+      mesh_.color(col.x, col.y, col.z, d == 0 ? op * 0.40f : op * 0.14f);   // many overlapping grains -> low per-grain alpha
+      mesh_.texCoord(std::min(3.f, sg / 0.5f), 0.f);   // size factor (melt swells the splats)
+    }
   }
   mesh_.update();
 }
@@ -221,6 +237,8 @@ void VesselSplats::draw(Graphics& g, const Vec3f& center, float scale, float alp
   g.shader().uniform("uHaloStr",   halo_strength_);
   g.shader().uniform("uIntensity", intensity_);
   g.shader().uniform("uAlpha",     alpha);
+  g.shader().uniform("uTint",      Vec3f(1.00f, 0.72f, 0.30f));  // distinct vessel hue (amber-gold) vs the web/galaxy
+  g.shader().uniform("uTintAmt",   0.70f);
   g.pushMatrix();
   g.translate(center.x, center.y, center.z);
   g.scale(scale);

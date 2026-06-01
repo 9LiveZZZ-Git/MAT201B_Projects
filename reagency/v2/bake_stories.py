@@ -28,6 +28,14 @@ font, fontname = load_font()
 _d = ImageDraw.Draw(Image.new("RGBA", (CW, CH)))
 def width(s): return _d.textlength(s, font=font)
 
+TWEET = 280                                  # "twitter rule": every quote/story fits in a tweet
+def tweet(s):
+    s = " ".join(s.split())
+    if len(s) <= TWEET: return s
+    cut = s[:TWEET]
+    sp = cut.rfind(" ")                      # break on a word boundary, not mid-word
+    return (cut[:sp] if sp > 40 else cut).rstrip(" ,;:-") + "…"
+
 def wrap(text, maxw):
     out, cur = [], ""
     for w in text.split():
@@ -43,6 +51,7 @@ sj = os.path.join(HERE, "stories.json")
 if os.path.exists(sj):
     for r in json.load(open(sj)):
         ol = (r.get("oneLiner") or "").strip()
+        ol = tweet(ol)                                   # "twitter rule": cap to a tweet so the whole passage fits
         if ol: stories.append((ol, r.get("era", "contemporary")))
     src = "stories.json (%d)" % len(stories)
 else:  # placeholder: parse them.txt data rows into one-liners
@@ -67,8 +76,11 @@ def galaxy_positions(n):
     ver, N, stride = struct.unpack_from("<iii", raw, 4)        # after 4-byte 'WSWP'
     a = np.frombuffer(raw, dtype="<f4", offset=16, count=N*stride).reshape(N, stride)
     pos = a[:, :3]
+    rad = np.sqrt((pos * pos).sum(1))                          # keep stories in the band the camera flies through
+    band = [i for i in range(N) if 1.3 <= rad[i] <= 4.5]       # (was full radius 0.66..6.88 -> many unreachable/illegible)
+    if len(band) < n: band = list(range(N))
     random.seed(SEED)
-    idx = random.sample(range(N), min(N, n*40))                # candidate pool
+    idx = random.sample(band, min(len(band), n*40))            # candidate pool
     # greedy farthest-point spread so stories don't pile up
     chosen = [idx[0]]
     for _ in range(min(n, len(idx)) - 1):

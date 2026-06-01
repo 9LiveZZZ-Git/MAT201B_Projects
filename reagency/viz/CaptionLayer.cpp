@@ -35,6 +35,7 @@ uniform float uAlpha;     // caption fade
 uniform vec4  uUV;        // atlas cell (u0,v0,u1,v1)
 uniform float uRevealX;   // [0,1] reveal edge in cell-u (left-to-right)
 uniform float uCursor;    // 0..1 cursor intensity (0 when line already finished)
+uniform float uGlitch;    // v2 T10: secondary chromatic wobble on the INK only (affect; never the cursor)
 in vec2 vuv;
 out vec4 fragColor;
 void main() {
@@ -44,7 +45,11 @@ void main() {
   float bar = (1.0 - smoothstep(0.0, 0.010, abs(vuv.x - uRevealX)))   // thin vertical bar
             * step(abs(vuv.y - 0.5), 0.40);                            // ~80% of cell height
   float cur = uCursor * bar;
-  vec3 rgb = c.rgb + vec3(cur);
+  vec3 rgb = c.rgb;
+  // glitch = affect only, scoped to the typed ink: a faint red-push / blue-pull unease. It does NOT
+  // touch the cursor (the human-authorship mark stays pure) nor the reveal (WHAT is typed is fixed).
+  if (uGlitch > 0.001) { rgb.r += uGlitch * 0.25 * ink; rgb.b -= uGlitch * 0.15 * ink; }
+  rgb += vec3(cur);
   float a = max(ink, cur) * uAlpha;
   if (a <= 0.002) discard;
   fragColor = vec4(rgb, a);
@@ -117,6 +122,7 @@ int CaptionLayer::pickNext(int act) {
   if (n == 0) return -1;
   for (int k = 0; k < n; ++k) {                     // pass 1: a caption written for this act
     int idx = (actCursor_ + k) % n;
+    if (captions_[idx].person == 1) continue;       // YOU is reserved for the Act-IV turn (forceYou)
     if (captions_[idx].act == act) { actCursor_ = (idx + 1) % n; return idx; }
   }
   for (int k = 0; k < n; ++k) {                     // pass 2: the SOLO line (act 0) as the fallback
@@ -126,16 +132,33 @@ int CaptionLayer::pickNext(int act) {
   return -1;
 }
 
+bool CaptionLayer::forceYou() {
+  if (!ready() || !meShown_) return false;          // confess-first: never YOU before a ME this cycle
+  const int n = int(captions_.size());
+  for (int k = 0; k < n; ++k) {
+    int idx = (actCursor_ + k) % n;
+    if (captions_[idx].person == 1) {               // the staged YOU line
+      cur_ = idx; typed_ = 0.f; alpha_ = 1.f; st_ = TYPING; phase_ = 0.f;
+      actCursor_ = (idx + 1) % n;
+      return true;
+    }
+  }
+  return false;
+}
+
 void CaptionLayer::update(int act, float dt) {
   if (!ready() || captions_.empty()) return;
   curAct_ = act;
+  if (act == 1 && lastAct_ > 1) meShown_ = false;   // reset confess-first guard at the loop seam
+  lastAct_ = act;
   blinkClock_ += dt;
   switch (st_) {
     case GAP:
       phase_ += dt;
       if (phase_ >= GAP_T) {
         const int n = pickNext(curAct_);
-        if (n >= 0) { cur_ = n; typed_ = 0.f; alpha_ = 1.f; st_ = TYPING; }
+        if (n >= 0) { cur_ = n; typed_ = 0.f; alpha_ = 1.f; st_ = TYPING;
+                      if (captions_[n].person == 0) meShown_ = true; }   // ME/SOLO satisfies confess-first
         phase_ = 0.f;
       }
       break;
@@ -159,7 +182,7 @@ void CaptionLayer::update(int act, float dt) {
 }
 
 void CaptionLayer::draw(Graphics& g, const Vec3f& camPos, const Vec3f& camFwd,
-                        const Vec3f& camRight, const Vec3f& camUp) {
+                        const Vec3f& camRight, const Vec3f& camUp, float glitch) {
   if (!ready() || alpha_ <= 0.002f || cur_ < 0) return;
   const Caption& cap = captions_[cur_];
   const int K = int(cap.lineIdx.size());
@@ -176,6 +199,7 @@ void CaptionLayer::draw(Graphics& g, const Vec3f& camPos, const Vec3f& camFwd,
   g.shader(shader_);
   tex_.bind(0);
   g.shader().uniform("tex", 0);
+  g.shader().uniform("uGlitch", glitch);   // T10: secondary chromatic wobble on the ink (affect only)
 
   int cum = 0;
   for (int i = 0; i < K; ++i) {

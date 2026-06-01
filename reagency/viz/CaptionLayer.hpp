@@ -7,9 +7,10 @@
 // Schedule is act-gated: ME in Act II/III, THEM in III, YOU in IV, US in V; the SOLO line fills
 // Act I (the fragment-viewer guarantee). Inert until the atlas exists.
 //
-// NOTE (dome): v1 drives the schedule on the local clock; on a single desktop node (== primary)
-// that is exact. Multi-node dome sync of the caption state is a Phase-2 follow-up (put cur_/typed_
-// into WoSWState). Allolib-only: custom GLSL through al::ShaderProgram.
+// NOTE (dome): the SCHEDULE runs only on the primary (update()); the active caption state
+// (cur_/typed_/alpha_) is published into WoSWState and applied on every renderer via
+// applySynced() before draw(), so the dome shows ONE synchronized voice (the cursor blink is
+// the only primary-local nicety). Allolib-only: custom GLSL through al::ShaderProgram.
 #include "al/graphics/al_Graphics.hpp"
 #include "al/graphics/al_Shader.hpp"
 #include "al/graphics/al_Texture.hpp"
@@ -27,8 +28,20 @@ struct CaptionLayer {
   // Advance the schedule for the current act (1..5). Call once per frame on the primary.
   void update(int act, float dt);
   // Draw the active caption head-locked in front of the camera (lower third, facing the viewer).
+  // glitch (v2 T10) is a SECONDARY chromatic wobble on the typed ink only (affect; never the cursor).
   void draw(al::Graphics& g, const al::Vec3f& camPos, const al::Vec3f& camFwd,
-            const al::Vec3f& camRight, const al::Vec3f& camUp);
+            const al::Vec3f& camRight, const al::Vec3f& camUp, float glitch = 0.f);
+
+  // v2 dome sync (T7): primary publishes these into WoSWState each frame; every renderer
+  // applySynced() before draw() so all nodes show the same line at the same reveal point.
+  int   curId() const { return cur_; }
+  float typed() const { return typed_; }
+  float alpha() const { return alpha_; }
+  void  applySynced(int cur, float typed, float alpha) { cur_ = cur; typed_ = typed; alpha_ = alpha; }
+
+  // T9 hook: emit the YOU line ON the Act-IV convergence frame — never on the free schedule, and
+  // never before a ME/SOLO has been shown this cycle (the confess-first invariant). True if fired.
+  bool  forceYou();
 
  private:
   struct Line    { int caption, person, act, row, chars; float ink; };
@@ -47,6 +60,8 @@ struct CaptionLayer {
   St    st_ = GAP;
   int   cur_ = -1, curAct_ = 0, actCursor_ = 0;
   float typed_ = 0.f, phase_ = 0.f, alpha_ = 0.f, blinkClock_ = 0.f;
+  bool  meShown_ = false;   // a ME/SOLO line has typed this cycle (gates the YOU turn)
+  int   lastAct_ = 0;       // edge-detect the cycle seam (act 5..->1) to reset meShown_
 
   int  pickNext(int act);
   bool loadAtlas(const std::string& path);

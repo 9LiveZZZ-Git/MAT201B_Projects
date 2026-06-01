@@ -8,8 +8,8 @@ namespace wosw {
 using namespace al;
 
 // proximity reveal: full text within NEAR, faded out by FAR (read what you fly past)
-static constexpr float NEAR = 1.6f, FAR = 4.5f;
-static constexpr float WHALF = 0.36f, LINEH = 0.085f;  // world size of a story line-cell (~1/4)
+static constexpr float NEAR = 2.4f, FAR = 7.5f;  // full text held across a wide band so you can read the whole passage as you pass
+static constexpr float WHALF = 0.20f, LINEH = 0.046f;  // world size of a story line-cell (smaller — whole passage fits in frame)
 
 static const char* kVert = R"GLSL(
 #version 330

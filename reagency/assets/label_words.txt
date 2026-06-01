@@ -1,27 +1,27 @@
 0 nadaljevati
 1 漆器
 2 piirtäminen
-3 armatura
-4 armas
-5 punho de ferro
+3 καλουπώνω
+4 armatura
+5 armas
 6 senjata api
 7 銃剣
 8 軍器
-9 manuscris
-10 mantra
-11 coin
-12 kukistaa
-13 rozkázať
-14 planta
-15 vigueur
-16 cilindro
-17 肝玉
-18 piirturi
-19 deposizione
-20 聖祭
-21 ดอกจำปี
-22 bloei
-23 花形
+9 punho de ferro
+10 manuscris
+11 mantra
+12 coin
+13 kukistaa
+14 rozkázať
+15 planta
+16 vigueur
+17 cilindro
+18 肝玉
+19 piirturi
+20 deposizione
+21 聖祭
+22 ดอกจำปี
+23 bloei
 24 海千山千
 25 shajati
 26 นักเขียนมุขตลก

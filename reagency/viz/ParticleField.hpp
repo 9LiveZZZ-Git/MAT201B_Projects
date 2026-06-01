@@ -25,8 +25,9 @@ struct ParticleField {
   bool init(const std::string& assetDir);
 
   // pointScale scales sprite size; bright scales overall intensity (the galaxy
-  // dims toward the vessel end of the depth crossfade).
-  void draw(al::Graphics& g, float pointScale = 1.f, float bright = 1.f);
+  // dims toward the vessel end of the depth crossfade). posterize (v2 T10) quantizes
+  // the color — the Act-V haunt residue that never fully clears once the turn is reached.
+  void draw(al::Graphics& g, float pointScale = 1.f, float bright = 1.f, float posterize = 0.f);
 
   int  count()      const { return n_; }
   bool loadedReal() const { return loaded_real_; }

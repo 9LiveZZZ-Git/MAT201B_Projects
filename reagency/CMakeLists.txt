@@ -28,6 +28,12 @@ add_executable(reagency
     viz/VesselSplats.cpp
     viz/HumanTrace.cpp
     viz/LabelLayer.cpp
+    viz/CaptionLayer.cpp
+    viz/StoryLayer.cpp
+    viz/CreditLayer.cpp
+    viz/DreamLayer.cpp
+    viz/EmergencePlayer.cpp
+    viz/DetectionHUD.cpp
     audio/AudioEngine.cpp
     core/Conductor.cpp)
 target_link_libraries(reagency PRIVATE al Threads::Threads)

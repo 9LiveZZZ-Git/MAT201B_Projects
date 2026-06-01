@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 
@@ -12,6 +13,11 @@ namespace wosw {
 static constexpr float kPI  = 3.14159265358979f;
 static constexpr float kTAU = 6.28318530717959f;
 static const float kJI[8] = {1.f, 16.f / 15.f, 6.f / 5.f, 5.f / 4.f, 4.f / 3.f, 3.f / 2.f, 7.f / 4.f, 2.f};
+// Eno generative loops (1d): coprime Fibonacci lengths, pitched layers, degree offsets, amps.
+static const int   LOOPLEN[8]   = {3, 5, 8, 13, 21, 34, 55, 89};
+static const int   LOOPLAYER[8] = {1, 0, 3, 5, 2, 1, 0, 5};            // bell/pluck/trace/organ/grain
+static const int   LOOPDEG[8]   = {0, 7, 4, -3, 9, 12, 2, -5};         // an evolving chord over the worker's register
+static const float LOOPAMP[8]   = {0.060f, 0.050f, 0.050f, 0.070f, 0.045f, 0.045f, 0.050f, 0.060f};
 
 // Recognizable PUBLIC-DOMAIN melodies (semitone offsets from tonic, + beat-durations). The top
 // grains occasionally coalesce into one of these (a familiar quote inside the machine's texture).
@@ -136,13 +142,35 @@ void AudioEngine::loadWords(const std::string& assetDir) {
   std::fprintf(stderr, "[wosw audio] words.txt not found — whisper uses per-node pseudo-vowels\n");
 }
 
+void AudioEngine::loadStories(const std::string& assetDir) {
+  // The 142 verified labor stories (THEM). Pretty-printed JSON -> parse line-by-line, one record per
+  // "oneLiner". Map year->register, the $ wage->dissonance, era->timbre family. No deps, sim-thread only.
+  const std::string bases[] = { assetDir + "/../v2", "../../v2", "reagency/v2", "MAT201B_Projects/reagency/v2" };
+  for (const auto& b : bases) {
+    FILE* f = std::fopen((b + "/stories.json").c_str(), "r"); if (!f) continue;
+    char line[1024]; Story cur; bool have = false;
+    auto flush = [&]() { if (have) stories_.push_back(cur); };
+    while (std::fgets(line, sizeof(line), f)) {
+      if (std::strstr(line, "\"oneLiner\"")) { flush(); cur = Story(); have = true; }
+      if (const char* y = std::strstr(line, "\"year\"")) { const char* c = std::strchr(y, ':');
+        if (c) { while (*c && (*c < '0' || *c > '9')) ++c; int yr = std::atoi(c); if (yr > 1000) cur.yearN = clamp01((float(yr) - 1770.f) / 255.f); } }
+      if (const char* g = std::strstr(line, "\"figure\"")) { const char* d = std::strchr(g, '$');
+        if (d) { double v = std::atof(d + 1); if (v > 0.0) cur.costN = clamp01(1.f - std::log10(std::max(0.5, v)) / 5.4f); } }
+      if (std::strstr(line, "\"era\"")) { if (std::strstr(line, "historical")) cur.era = 1; else if (std::strstr(line, "contemporary")) cur.era = 0; }
+    }
+    flush(); std::fclose(f);
+    if (!stories_.empty()) { std::fprintf(stderr, "[wosw audio] %zu labor stories (THEM spine) from %s/stories.json\n", stories_.size(), b.c_str()); return; }
+  }
+  std::fprintf(stderr, "[wosw audio] stories.json not found — THEM spine inert\n");
+}
+
 void AudioEngine::init(const std::string& assetDir, double sampleRate) {
   sr_ = sampleRate > 0 ? sampleRate : 44100.0;
-  loadManifest(assetDir); loadSamples(assetDir); loadWords(assetDir);
+  loadManifest(assetDir); loadSamples(assetDir); loadWords(assetDir); loadStories(assetDir);
   reverb_.bandwidth(0.9f); reverb_.damping(0.45f); reverb_.decay(0.9f);
   sampRev_.bandwidth(0.9f); sampRev_.damping(0.5f); sampRev_.decay(0.62f);   // room for the samples (longer)
   cClusterRoot_.store(root_, std::memory_order_relaxed); subHz_ = root_ * 0.25f;
-  for (int p = 0; p < PADN; ++p) padHz_[p] = root_ * kJI[p == 0 ? 0 : (p == 1 ? 2 : (p == 2 ? 5 : 7))];
+  for (int p = 0; p < PADN; ++p) { cSpectrum_[p].store(float(p + 1)); padRatioCur_[p] = float(p + 1); padHz_[p] = root_ * float(p + 1); }
   ppN_ = int(sr_ * 0.55); if (ppN_ < 64) ppN_ = 64;    // ping-pong delay buffers (allocated once)
   ppL_.assign(ppN_, 0.f); ppR_.assign(ppN_, 0.f); ppPos_ = 0;
   for (int i = 0; i < NGATE; ++i) { cGate_[i].store(1.f); cGateTau_[i].store(0.5f); gate_[i] = 1.f; }
@@ -231,6 +259,60 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
   else melodyOn_ = false;                                     // the tune is the SEDUCTION only
   float mc = std::min(1.f, dt * 0.25f); moodBright_ += (mbTgt_ - moodBright_) * mc; moodDens_ += (mdTgt_ - moodDens_) * mc; moodWet_ += (mwTgt_ - moodWet_) * mc;
   cMoodBright_.store(moodBright_, std::memory_order_relaxed); cMoodDens_.store(moodDens_, std::memory_order_relaxed); cMoodWet_.store(moodWet_, std::memory_order_relaxed);
+
+  // ---- AVANT-GARDE per-act dispatch: living spectrum, Xenakis cloud, voice granulator, the TURN cut ----
+  // 1a within-section BUILD: f ramps 0->1 across the section so sections EVOLVE rather than slam.
+  if (a != prevConductAct_) { actElapsed_ = 0.f; prevConductAct_ = a; }
+  actElapsed_ += dt;
+  static const float SEGDUR[6] = {200.f, 210.f, 150.f, 150.f, 90.f, 240.f};
+  const float f = clamp01(actElapsed_ / SEGDUR[a]);
+  static const float SPARS[6] = {0.6f, 0.55f, 0.50f, 0.10f, 0.85f, 0.70f};   // higher -> fewer Eno loops survive
+  cSparsity_.store(SPARS[a], std::memory_order_relaxed);
+  static const float ACT_INH[6]    = {0.f, 0.030f, 0.080f, 0.55f,  0.22f, 0.15f};   // inharmonic stretch (audible from act I)
+  static const float ACT_BEAT[6]   = {0.f, 0.022f, 0.032f, 0.060f, 0.045f, 0.035f}; // difference-tone beating (clearly rough)
+  static const float ACT_TOPCUT[6] = {0.f, 0.f,    0.f,    0.f,    0.f,   1.f};      // V: thin the upper partials -> ghost
+  cBeat_.store(ACT_BEAT[a] * (0.6f + 0.4f * f) + 0.04f * cCostBeat_.load(std::memory_order_relaxed), std::memory_order_relaxed);  // builds in; cheap wage -> rougher
+  cTopCut_.store(ACT_TOPCUT[a], std::memory_order_relaxed);
+  for (int p = 0; p < PADN; ++p) {
+    float stretch = float(p + 1) * std::pow(1.f + ACT_INH[a], float(p));            // upper partials drift sharp
+    cSpectrum_[p].store(stretch + 0.012f * (kJI[(p * 3) & 7] - 1.f) * (a == 3 ? 3.f : 1.f), std::memory_order_relaxed);
+  }
+  static const float CL[6] = {6, 6, 4, 40, 2, 7};                                   // grain cloud rate per act
+  static const float SP[6] = {0, 0.28f, 0.42f, 0.90f, 0.f, 0.55f};                  // glissando span (audible gliss from act I)
+  static const float QU[6] = {1, 1.f, 0.80f, 0.15f, 1.f, 0.60f};                    // P(quantized) vs continuous gliss
+  cCloudLam_.store(CL[a] * (0.5f + 0.5f * f), std::memory_order_relaxed); cCloudSpread_.store(SP[a], std::memory_order_relaxed); cQuant_.store(QU[a], std::memory_order_relaxed);   // swarm builds across the section
+  static const float GD[6]  = {0, 4.f, 14.f, 90.f, 24.f, 6.f};                       // granulator density (a grain halo even in act I)
+  static const float GS[6]  = {0.06f, 0.06f, 0.09f, 0.018f, 0.03f, 0.11f};           // grain length (s)
+  static const float GSC[6] = {0, 0.f, 0.f, 0.85f, 0.30f, 1.0f};                     // scatter into the past
+  static const float GRV[6] = {0, 0.f, 0.f, 0.40f, 0.f, 0.50f};                      // P(reverse)
+  static const float GPT[6] = {0, 0.f, 0.f, 7.f, 0.f, 0.f};                          // pitch-shatter +-semis
+  cGranDens_.store(GD[a] * (0.6f + 0.8f * moodDens_), std::memory_order_relaxed);
+  cGranSize_.store(GS[a], std::memory_order_relaxed); cGranScat_.store(GSC[a], std::memory_order_relaxed);
+  cGranRev_.store(GRV[a], std::memory_order_relaxed); cGranPitch_.store(GPT[a], std::memory_order_relaxed);
+  // IV TURN: latch a structural CUT to silence + reverb freeze on the III->IV edge, hold ~0.35 s
+  if (a == 4 && lastActEdge_ != 4) cutHold_ = 0.35f;
+  lastActEdge_ = a;
+  if (cutHold_ > 0.f) { cutHold_ -= dt; cCut_.store(0.f, std::memory_order_relaxed); cFreeze_.store(1.f, std::memory_order_relaxed); }
+  else { cCut_.store(1.f, std::memory_order_relaxed); cFreeze_.store(0.f, std::memory_order_relaxed); }
+  // sample CHOIR density/amp per act (the washed background)
+  static const float CHOIR_LAM[6] = {0.f, 2.0f, 3.0f, 1.0f, 0.f, 4.0f};
+  static const float CHOIR_AMP[6] = {0.f, 0.8f, 1.0f, 0.4f, 0.f, 1.0f};
+  cChoirLam_.store(CHOIR_LAM[a], std::memory_order_relaxed); cChoir_.store(CHOIR_AMP[a], std::memory_order_relaxed);
+  // STORY SPINE (THEM): pop one named worker every Fibonacci phrase; year->register, wage->roughness, era->pan
+  if (!stories_.empty()) {
+    phraseT_ -= dt;
+    if (phraseT_ <= 0.f) {
+      static const float FIBPH[6] = {3.f, 5.f, 8.f, 5.f, 3.f, 2.f};            // phrase length in BEATS (Fibonacci)
+      float beat = 1.f / std::max(0.5f, slotRate(depth, hesitation, activity_));
+      phraseT_ = FIBPH[phraseIdx_ % 6] * beat; ++phraseIdx_;
+      const Story& st = stories_[storyIdx_ % stories_.size()]; ++storyIdx_;
+      cCostBeat_.store(st.costN, std::memory_order_relaxed);
+      int deg = int((st.yearN * 2.f - 1.f) * float(modeN_)) + modeN_;          // historical->low, contemporary->high
+      cStoryDeg_.store(float(deg), std::memory_order_relaxed);
+      Ev e{}; e.kind = EV_NOTE; e.layer = 5; e.hz = degHz(deg) * 0.5f; e.amp = 0.055f; e.pan = 0.6f * (st.era ? -1.f : 1.f); push(e);   // the worker's sustained TONE
+      if (!wordbank_.empty()) whisper(wordbank_[(storyIdx_ * 1103515245u + 12345u) % wordbank_.size()], curNode_, 0.5f * (st.era ? -1.f : 1.f));
+    }
+  }
   // per-element dropout TEXTURES within the act palette (an act-silent layer stays silent)
   auto dr = [&]() { dprng_ ^= dprng_ << 13; dprng_ ^= dprng_ >> 17; dprng_ ^= dprng_ << 5; return float(dprng_) / 4294967296.f; };
   for (int i = 0; i < NGATE; ++i) {
@@ -317,11 +399,11 @@ float AudioEngine::tickVoice(Voice& v, float isr, float depth, float bright) {
   if (v.layer == 6) { float fk = 36.f + 80.f * std::exp(-v.age / 0.032f); v.phase += fk * isr; if (v.phase >= 1.f) v.phase -= 1.f;
     float click = (v.age < 0.004f) ? (1.f - v.age / 0.004f) * (vrand(v.grng) * 2.f - 1.f) * 0.6f : 0.f; return (std::sin(kTAU * v.phase) * std::exp(-v.age / 0.10f) + click) * v.amp; }
   if (v.layer == 9) { float n = vrand(v.grng) * 2.f - 1.f; v.lp = dn(v.lp + 0.5f * (n - v.lp)); return (n - v.lp) * std::exp(-v.age / 0.0035f) * v.amp; }   // off-beat "and" click (high-passed)
-  if (v.smp) { if (v.smpPos >= v.smpLen - 2) { v.on = false; return 0.f; } int i0 = int(v.smpPos); float fr = v.smpPos - i0; float s = v.smp[i0]*(1.f-fr) + v.smp[i0+1]*fr; v.smpPos += v.smpRate;
+  if (v.smp) { if (v.smpPos >= v.smpLen - 2 || v.smpPos < 0.f) { v.on = false; return 0.f; } int i0 = int(v.smpPos); float fr = v.smpPos - i0; float s = v.smp[i0]*(1.f-fr) + v.smp[i0+1]*fr; v.smpPos += v.smpRate;
     float env; if (v.layer == 3 || v.layer == 5) env = (u < (v.atk/v.life)) ? (u/std::max(1e-4f, v.atk/v.life)) : (u < 0.6f ? 1.f : std::max(0.f, 1.f-(u-0.6f)/0.4f));
     else { float a = v.atk/v.life; env = (u < a) ? (u/std::max(1e-4f,a)) : (u > 0.85f ? (1.f-(u-0.85f)/0.15f) : 1.f); }
-    v.phase += 41.f * isr; if (v.phase >= 1.f) v.phase -= 1.f;                          // slight GRANULATION:
-    float gmod = 0.74f + 0.26f * (0.5f - 0.5f * std::cos(kTAU * v.phase));              // a soft grain-window flutter
+    v.phase += 64.f * isr; if (v.phase >= 1.f) v.phase -= 1.f;                          // GRANULATION (deeper -> grain cloud):
+    float gmod = 0.40f + 0.60f * (0.5f - 0.5f * std::cos(kTAU * v.phase));              // chop the sample into a grain stream
     return s * env * v.amp * gmod; }
   if (v.layer == 4) {
     // step the formant resonators through the word's vowels (speech-like synthesis)
@@ -350,6 +432,12 @@ void AudioEngine::fireKick() { Ev e{}; e.kind = EV_NOTE; e.layer = 6; e.hz = jiB
 void AudioEngine::fireTimp() { timpDeg_ = (timpDeg_ + 1 + int(frand() * 2.f)) % (modeN_ * 2); Ev e{}; e.kind = EV_NOTE; e.layer = 7; e.hz = degHz(timpDeg_) * 0.5f; e.amp = 0.24f; e.pan = 0.18f * (2.f * frand() - 1.f); schedule(e); }
 void AudioEngine::fireClang() { Ev e{}; e.kind = EV_NOTE; e.layer = 8; e.hz = 60.f + 200.f * frand(); e.amp = 0.14f + 0.10f * frand(); e.pan = 0.8f * (2.f * frand() - 1.f); schedule(e); }
 void AudioEngine::fireAnd() { int i = allocCapped(9, 3); if (i < 0) return; Voice& v = vox_[i]; v = Voice{}; v.on = true; v.layer = 9; v.life = 0.05f; v.age = 0.f; v.amp = 0.05f; v.pan = 0.1f * (2.f * frand() - 1.f); v.grng = rng_ ^ uint32_t(i * 668265263u); }   // tics lower
+void AudioEngine::fireLoop(int L) {   // Eno loop L fires a note on its layer, relative to the current worker's register
+  int deg = int(cStoryDeg_.load(std::memory_order_relaxed)) + LOOPDEG[L];
+  int lay = LOOPLAYER[L];
+  Ev e{}; e.kind = EV_NOTE; e.layer = lay; e.hz = degHz(deg) * (lay == 5 ? 0.5f : 1.f);
+  e.amp = LOOPAMP[L]; e.pan = 0.7f * (2.f * float(L) / float(NLOOP - 1) - 1.f); schedule(e);
+}
 
 void AudioEngine::render(al::AudioIOData& io) {
   const int nf = int(io.framesPerBuffer()), nch = int(io.channelsOut());
@@ -380,6 +468,10 @@ void AudioEngine::render(al::AudioIOData& io) {
   for (int i = 0; i < NGATE; ++i)
     gate_[i] += (cGate_[i].load(std::memory_order_relaxed) - gate_[i]) * gco(cGateTau_[i].load(std::memory_order_relaxed), nf, sr_);
   growl_       += (cGrowl_.load(std::memory_order_relaxed)       - growl_)       * gco(0.4f, nf, sr_);
+  cut_    += (cCut_.load(std::memory_order_relaxed)    - cut_)    * gco(0.05f, nf, sr_);   // IV structural cut (~50 ms)
+  freeze_ += (cFreeze_.load(std::memory_order_relaxed) - freeze_) * gco(0.10f, nf, sr_);
+  int nOn = 0; for (auto& v : vox_) if (v.on) ++nOn;                                    // 1e anti-mud: census once/buffer
+  float busyGain = 1.f / (1.f + 0.012f * float(std::max(0, nOn - 26)));                 // gentle headroom as the tutti fills
 
   float decay = std::min(0.985f, 0.86f + 0.10f * (1.f - depth)), damp = 0.35f + 0.30f * (1.f - depth);
   if (std::fabs(decay - lastDecay_) > 1e-3f) { reverb_.decay(decay); lastDecay_ = decay; }
@@ -404,7 +496,6 @@ void AudioEngine::render(al::AudioIOData& io) {
     const float gf[3] = {wf0, wf1, wf2}, gbw[3] = {110.f, 120.f, 150.f};
     for (int k = 0; k < 3; ++k) { float r = std::exp(-kPI * gbw[k] / float(sr_));
       growlFmtCoef_[k][0] = (1.f - r); growlFmtCoef_[k][1] = -2.f * r * std::cos(kTAU * gf[k] / float(sr_)); growlFmtCoef_[k][2] = r * r; } }
-  const float padRatio[PADN] = {1.f, kJI[2], 1.5f, 2.f};
 
   // industrial-clang scheduler (sparse, "in places"; a touch more likely when tense)
   fxTimer_ -= float(nf) * isr; if (fxTimer_ <= 0.f) { fxTimer_ = 4.f + 10.f * frand() - 4.f * tension_; if (fxTimer_ < 2.f) fxTimer_ = 2.f; fireClang(); }   // industrial more present
@@ -422,7 +513,11 @@ void AudioEngine::render(al::AudioIOData& io) {
     panLFO_ += 0.05f * isr; if (panLFO_ >= 1.f) panLFO_ -= 1.f; float drift = 0.25f * std::sin(kTAU * panLFO_);
 
     float euPrev = euPhase_;
-    euPhase_ += slot * isr; if (euPhase_ >= 1.f) { euPhase_ -= 1.f; euStep_ = (euStep_ + 1) % euLen_; if ((euMask_ >> euStep_) & 1u) fireKick(); }
+    euPhase_ += slot * isr;
+    if (euPhase_ >= 1.f) { euPhase_ -= 1.f; euStep_ = (euStep_ + 1) % euLen_; if ((euMask_ >> euStep_) & 1u) fireKick();
+      float spars = cSparsity_.load(std::memory_order_relaxed);   // Eno loops advance one step per beat
+      for (int L = 0; L < NLOOP; ++L) { loopStep_[L] = (loopStep_[L] + 1) % LOOPLEN[L];
+        if (loopStep_[L] == 0 && spars < float(NLOOP - L) / float(NLOOP)) fireLoop(L); } }
     if (euPrev < 0.5f && euPhase_ >= 0.5f) fireAnd();     // the off-beat "and"
     euPhase2_ += slot * 0.5f * isr; if (euPhase2_ >= 1.f) { euPhase2_ -= 1.f; euStep2_ = (euStep2_ + 1) % euLen2_; if ((euMask2_ >> euStep2_) & 1u) fireTimp(); }
     wobPhase_ += wobHz * isr; if (wobPhase_ >= 1.f) wobPhase_ -= 1.f;
@@ -467,18 +562,24 @@ void AudioEngine::render(al::AudioIOData& io) {
       padDrift_[p] += (0.013f + 0.007f * p) * isr; if (padDrift_[p] >= 1.f) padDrift_[p] -= 1.f;
       padTrem_[p]  += (0.030f + 0.020f * p) * isr; if (padTrem_[p]  >= 1.f) padTrem_[p]  -= 1.f;
       float ratioMove = 1.f + 0.004f * std::sin(kTAU * padDrift_[p] + p * 1.7f);   // slow chorus drift
-      float tgt = padRoot * padRatio[p] * ratioMove; padHz_[p] += (tgt - padHz_[p]) * 0.0006f;
+      padRatioCur_[p] += (cSpectrum_[p].load(std::memory_order_relaxed) - padRatioCur_[p]) * 0.00008f;   // slow spectral morph
+      float tgt = padRoot * padRatioCur_[p] * ratioMove;
+      if (tgt > 0.45f * float(sr_)) tgt = 0.45f * float(sr_);            // nyquist guard (inharmonic partials can fly high)
+      padHz_[p] += (tgt - padHz_[p]) * 0.0006f;
       padVib_[p] += (0.10f + 0.06f * p) * isr; if (padVib_[p] >= 1.f) padVib_[p] -= 1.f;
       float vib = 1.f + 0.012f * std::sin(kTAU * padVib_[p] + p);
       padPhase_[p] += padHz_[p] * vib * isr; if (padPhase_[p] >= 1.f) padPhase_[p] -= std::floor(padPhase_[p]);
-      float sg = 0.6f * std::sin(kTAU * padPhase_[p]) + 0.25f * std::sin(kTAU * padPhase_[p] * 2.f);
+      float det = cBeat_.load(std::memory_order_relaxed) * padRatioCur_[p] * 0.5f;     // difference-tone detune
+      padBeatPh_[p] += padHz_[p] * (1.f + det) * vib * isr; if (padBeatPh_[p] >= 1.f) padBeatPh_[p] -= std::floor(padBeatPh_[p]);
+      float sg = 0.45f * std::sin(kTAU * padPhase_[p]) + 0.45f * std::sin(kTAU * padBeatPh_[p]) + 0.20f * std::sin(kTAU * padPhase_[p] * 2.f);
       padLp_[p] = dn(padLp_[p] + (0.12f + 0.40f * depth) * (sg - padLp_[p]));
       padHp_[p] = dn(padHp_[p] + 0.025f * (padLp_[p] - padHp_[p]));   // track lows (~180 Hz)
       float sigHp = padLp_[p] - padHp_[p];                            // HIGH-PASS the drone to clear room for the sub-bass
       float trem = 0.72f + 0.28f * std::sin(kTAU * padTrem_[p]);                    // slow amplitude swell
-      float tgtAmp = ((p < 2) ? 0.032f : 0.032f * padBloom_) * trem; padAmp_[p] += (tgtAmp - padAmp_[p]) * 0.002f;   // drone ~-10 dB
+      float topFade = 1.f - cTopCut_.load(std::memory_order_relaxed) * 0.85f * float(p) / float(PADN);   // V thins the upper partials
+      float tgtAmp = ((p < 2) ? 0.026f : 0.026f * padBloom_) * trem * topFade; padAmp_[p] += (tgtAmp - padAmp_[p]) * 0.002f;   // 0.026 (8 partials; spectrum audible)
       float a = padAmp_[p] * sigHp * gate_[G_DRONE];       // drone drops out independently
-      float pan = (p == 0) ? 0.f : (p == 1 ? -0.55f : (p == 2 ? 0.55f : 0.78f)); pan += 0.12f * drift; float pp = 0.5f * (pan + 1.f);
+      float pan = -0.78f + 1.56f * float(p) / float(PADN - 1); pan += 0.12f * drift; float pp = 0.5f * (pan + 1.f);   // spread the 8 partials across the field
       bedL += a * std::cos(pp * 1.5707963f); bedR += a * std::sin(pp * 1.5707963f); revSend += a * 0.8f;
     }
     beatPhase_ += padRoot * fifthB * isr; if (beatPhase_ >= 1.f) beatPhase_ -= std::floor(beatPhase_);
@@ -506,9 +607,42 @@ void AudioEngine::render(al::AudioIOData& io) {
 
     // grain cloud (Poisson)
     grainTimer_ -= isr;
-    if (grainTimer_ <= 0.f) { float lam = 5.f + 30.f * clamp01(0.3f * act + 0.3f * (1.f - depth) + 0.4f * hes + 0.4f * md); grainTimer_ += -std::log(std::max(1e-6f, frand())) / lam;
-      int gi = allocCapped(2, 28); if (gi >= 0) { Voice& g = vox_[gi]; g = Voice{}; g.on = true; g.layer = 2; int oc = int(frand() * 4.f) - 1; g.hz = degHz(nodeDegree(int(rng_ & 2047), -1)) * std::pow(2.f, float(oc));
+    if (grainTimer_ <= 0.f) { float lam = 2.f + cCloudLam_.load(std::memory_order_relaxed); grainTimer_ += -std::log(std::max(1e-6f, frand())) / lam;
+      int gi = allocCapped(2, 28); if (gi >= 0) { Voice& g = vox_[gi]; g = Voice{}; g.on = true; g.layer = 2;
+        float spread = cCloudSpread_.load(std::memory_order_relaxed), quant = cQuant_.load(std::memory_order_relaxed);
+        float span = 1.f + 4.f * spread, base = degHz(nodeDegree(int(rng_ & 2047), -1));
+        g.hz = (quant > frand()) ? base * std::pow(2.f, float(int(frand() * span) - int(span * 0.5f)))
+                                 : base * std::pow(2.f, (frand() * 2.f - 1.f) * span);   // continuous glissando = Xenakis cloud
         g.K = 2; g.pm[0] = 1; g.pm[1] = 2; g.pa[0] = 1; g.pa[1] = 0.25f + 0.4f * frand(); g.pnorm = 1.f + g.pa[1]; g.amp = (0.022f + 0.04f * act * (0.5f + frand())) * gate_[G_GRAIN]; g.life = 0.02f + 0.18f * frand(); g.pan = 0.9f * (2.f * frand() - 1.f); g.grng = rng_ ^ (uint32_t(gi) * 40503u); } }
+
+    // CC0 SAMPLE CHOIR: long, slow-attack, reverb-washed grains drawn from the sample bank (US: the comfortable
+    // background built atop their voice). Era biases the timbre family. tslot=-7 routes it to the washed tier.
+    choirTimer_ -= isr; float clam = cChoirLam_.load(std::memory_order_relaxed);
+    if (clam > 0.05f && choirTimer_ <= 0.f) { choirTimer_ += -std::log(std::max(1e-6f, frand())) / clam;
+      int gi = allocCapped(2, 28); if (gi >= 0) { Voice& g = vox_[gi]; g = Voice{};
+        Role& R = (frand() < 0.6f) ? rTrace_ : rBass_;
+        int sidx = pickSample(R, degHz(nodeDegree(int(rng_ & 2047), -1)));
+        if (sidx >= 0) { const Sample& smp = samples_[sidx];
+          g.on = true; g.layer = 2; g.tslot = -7;
+          g.smp = smp.data.data(); g.smpLen = int(smp.data.size()); g.smpPos = 0.f;
+          g.smpRate = (smp.srcSR / float(sr_)) * (smp.pitched ? std::pow(2.f, float((int(frand() * 3) - 1) * 12) / 12.f) : 1.f);
+          g.amp = 0.05f * cChoir_.load(std::memory_order_relaxed); g.life = 1.5f + 2.5f * frand(); g.atk = 0.3f + 0.5f * frand();
+          g.phase = frand(); g.pan = 0.9f * (2.f * frand() - 1.f);
+        } } }
+
+    // GRANULAR SHRED of the whisper: grains read the lead-capture ring (the machine chewing the human voice)
+    granTimer_ -= isr; float gdv = cGranDens_.load(std::memory_order_relaxed);
+    if (gdv > 0.5f && granTimer_ <= 0.f) { granTimer_ += -std::log(std::max(1e-6f, frand())) / gdv;
+      int gi = allocCapped(2, 28); if (gi >= 0) { Voice& g = vox_[gi]; g = Voice{};
+        float off = float(capPos_) - cGranScat_.load(std::memory_order_relaxed) * frand() * float(CAPN) * 0.9f;
+        while (off < 0.f) off += float(CAPN);
+        bool rev = frand() < cGranRev_.load(std::memory_order_relaxed);
+        float semis = (2.f * frand() - 1.f) * cGranPitch_.load(std::memory_order_relaxed);
+        g.on = true; g.layer = 2; g.smp = cap_.data(); g.smpLen = CAPN; g.smpPos = off;
+        g.smpRate = std::pow(2.f, semis / 12.f) * (rev ? -1.f : 1.f);
+        g.amp = 0.085f * gate_[G_GRAIN] * gate_[G_WHISPER];   // the voice-shred sits clearly in the mix
+        g.life = cGranSize_.load(std::memory_order_relaxed); g.atk = g.life * 0.3f;
+        g.pan = 0.9f * (2.f * frand() - 1.f); g.grng = rng_ ^ uint32_t(gi * 2654435761u); } }
 
     // pooled voices
     float ppSendL = 0.f, ppSendR = 0.f, sampSend = 0.f;
@@ -528,7 +662,9 @@ void AudioEngine::render(al::AudioIOData& io) {
         float cL = std::cos(pp * 1.5707963f), cR = std::sin(pp * 1.5707963f);
         bool up = (v.layer <= 2 || v.layer == 8);            // upper part: pluck/bell/grain/clang
         float dryg = up ? 0.72f : 1.f, rv = up ? 1.25f : 0.5f;   // pushed back + further into reverb
-        if (v.smp) { dryg = 1.35f; rv = 0.7f; }              // bring the CC0 SAMPLES out front
+        if (v.smp == cap_.data()) { dryg = 1.2f; rv = 0.8f; }                    // the voice-shred grains stay present
+        else if (v.tslot == -7) { dryg = 0.22f; rv = 2.8f; sampSend += s * 1.2f; }  // CHOIR: deep background wash
+        else if (v.smp) { dryg = 0.38f; rv = 2.1f; }                             // other CC0 samples -> pushed back
         bedL += dryg * s * cL; bedR += dryg * s * cR; revSend += s * rv;
         if (v.layer == 2) { ppSendL += 0.55f * s * cL; ppSendR += 0.55f * s * cR; }   // grains -> delay
         if (v.smp) sampSend += s;                                                     // CC0 samples -> short reverb
@@ -539,11 +675,13 @@ void AudioEngine::render(al::AudioIOData& io) {
       ppL_[ppPos_] = dn(ppSendL + dR * 0.42f); ppR_[ppPos_] = dn(ppSendR + dL * 0.42f); ppPos_ = (ppPos_ + 1) % ppN_;
       bedL += dL * 0.32f; bedR += dR * 0.32f; }
     // short MONO reverb to blend the CC0 samples (pluck/bell/trace/organ)
-    { float sw1 = 0.f, sw2 = 0.f; sampRev_(sampSend * 0.6f, sw1, sw2, 0.6f); float sw = 0.5f * (sw1 + sw2); bedL += sw * 0.5f; bedR += sw * 0.5f; }   // more sample reverb
+    { float sw1 = 0.f, sw2 = 0.f; sampRev_(sampSend * 0.85f, sw1, sw2, 0.78f); bedL += sw1 * 0.85f; bedR += sw2 * 0.85f; }   // samples washed into the background
 
+    cap_[capPos_] = leadL + leadR; capPos_ = (capPos_ + 1) & (CAPN - 1);   // capture the whisper lead for granulation
+    revSend *= (1.f - 0.9f * freeze_);                                     // IV freeze: cut the reverb FEED; its tail rings on
     float w1 = 0.f, w2 = 0.f; reverb_(revSend * 0.5f, w1, w2, 0.6f);
-    float L = duckGain_ * bedL + leadL + lowDuck_ * lowMono + reverbWet_ * w1;
-    float R = duckGain_ * bedR + leadR + lowDuck_ * lowMono + reverbWet_ * w2;
+    float L = busyGain * cut_ * (duckGain_ * bedL + leadL + lowDuck_ * lowMono + reverbWet_ * w1);   // cut_ = IV structural silence
+    float R = busyGain * cut_ * (duckGain_ * bedR + leadR + lowDuck_ * lowMono + reverbWet_ * w2);
     masterLoL_ = dn(masterLoL_ + aLo * (L - masterLoL_)); L += 2.16f * masterLoL_;
     masterLoR_ = dn(masterLoR_ + aLo * (R - masterLoR_)); R += 2.16f * masterLoR_;
     masterHiL_ = dn(masterHiL_ + aHi * (L - masterHiL_)); L += 0.45f * (masterHiL_ - L);   // pink HF tilt

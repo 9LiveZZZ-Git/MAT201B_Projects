@@ -25,5 +25,16 @@ factory/*.zip
 # warning). This re-exclusion must come AFTER the !assets/** re-include to win (last match).
 assets/vessel.wswv
 
-# Local backup of the pre-50k preview assets (not for the repo)
+# v2 Phase-2 dreams: the raw dream PNGs + emergence frames (~92 MB) come from the Qwen Colab run
+# and are regenerable (re-download + bake) — keep them OUT of git. The galaxy itself (points.bin/
+# edges.bin with the 36 concatenated dream nodes) and the small dream_provenance.json ARE tracked.
+assets/dreams/
+
+# Local backups of pre-install galaxies (not for the repo)
 assets_preview_877/
+assets_pre_qwen_*/
+
+# Baked dream/emergence atlases: regenerable locally via v2/bake_dreams.py + v2/bake_emergence.py.
+# emergence_atlas.png (~29 MB) is too big for git; the small credits_atlas + the *_index/_pos txt
+# (the source-of-truth metadata) and dream_atlas.png stay tracked.
+v2/emergence_atlas.png

@@ -1,0 +1,11 @@
+# creditId startRow numLines  (THEM worker rows from them.txt; head-locked, alpha floor ~0.12)
+0 0 2
+1 2 3
+2 5 3
+3 8 4
+4 12 3
+5 15 3
+6 18 3
+7 21 3
+8 24 2
+9 26 3
