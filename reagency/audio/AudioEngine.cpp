@@ -505,25 +505,11 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
       else if (!wordbank_.empty()) whisper(wordbank_[(storyIdx_ * 1103515245u + 12345u) % wordbank_.size()], curNode_, 0.5f * (st.era ? -1.f : 1.f));   // envelope dead OR whisper's turn -> whisper
     }
   }
-  // per-element dropout TEXTURES within the act palette (an act-silent layer stays silent)
-  auto dr = [&]() { dprng_ ^= dprng_ << 13; dprng_ ^= dprng_ >> 17; dprng_ ^= dprng_ << 5; return float(dprng_) / 4294967296.f; };
-  for (int i = 0; i < NGATE; ++i) {
-    // VOICE PROTECTION: do NOT let the dropout scheduler silence the whisper/voice layer in the acts
-    // where THEM leads (II READING / III EXTRACTION / IV TURN) -> the testimonies stay present (the bed
-    // still ducks + thins around them; the voice itself just never vanishes for 25-45 s mid-phrase).
-    if (i == G_WHISPER && a >= 2 && a <= 4) { dropTgt_[i] = 1.f; cGate_[i].store(aGate[i], std::memory_order_relaxed); continue; }
-    dropT_[i] -= dt;
-    if (dropT_[i] <= 0.f) {
-      bool on = dropTgt_[i] > 0.5f;
-      dropTgt_[i] = on ? (dr() < 0.20f ? 0.f : 1.f) : 1.f;                            // ~20% chance an ON element drops
-      // EXIT (drop to silence) always RAMPS gently (1.8-5 s) so stops don't snap; an entrance may snap in or fade.
-      cGateTau_[i].store((dropTgt_[i] < 0.5f) ? (1.8f + 3.2f * dr())
-                                              : ((dr() < 0.45f) ? (0.012f + 0.03f * dr()) : (1.2f + 3.0f * dr())),
-                         std::memory_order_relaxed);
-      dropT_[i] = (dropTgt_[i] > 0.5f) ? (18.f + 55.f * dr()) : (25.f + 20.f * dr());  // on 18-73 s, SILENCE 25-45 s
-    }
-    cGate_[i].store(aGate[i] * dropTgt_[i], std::memory_order_relaxed);               // act palette x dropout texture
-  }
+  // ARRANGEMENT: each element follows ONLY its per-act palette gate. The per-element RANDOM dropout
+  // texture (drone pause / ensemble drop-outs) is REMOVED at the artist's request — the in/out gating
+  // distracted from the composition. Act transitions still glide via cGateTau_ (0.5 s init); the sub
+  // pulse, conductor, techniques, Eno loops + grain cloud keep the bed alive without random silences.
+  for (int i = 0; i < NGATE; ++i) cGate_[i].store(aGate[i], std::memory_order_relaxed);
   // recognizable PD melody: emit the next note ~once per beat; grains gated down so it emerges
   if (melodyOn_) {
     melNoteTimer_ -= dt;
