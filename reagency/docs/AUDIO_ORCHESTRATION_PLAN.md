@@ -14,8 +14,11 @@
       relative to the worker's register, gated by `cSparsity_` -> never repeats over 14 min.
 - [x] **Phase 1 / 1e — Anti-mud:** per-buffer voice census -> `busyGain` headroom law on the master; layer-2
       pool capped (allocCapped 28). **PHASE 1 COMPLETE.**
-- [ ] **Phase 2 — real ghostly voices + dream-emergence** (needs offline-baked assets from Colab).
-- [ ] **Later — deeper Xenakis (GENDYN, sieves, arborescences) + glitch axis.**
+- [x] **Phase 2 — real ghostly voices + dream-emergence** — CODE COMPLETE (212d4a3, verified in engine):
+      2a `rVoice_` router (`AudioEngine.cpp:91`) + real-speech sample on layer-4 EV_WHISPER (`:451`, synth fallback);
+      2b `whisperChorus()` (`:241`) + `cChorusN_`/`cFmtShift_` conductor-driven (`:322`); 2c `cEmerge_` (`:335`) +
+      per-step `EV_GLITCH=6` (`:336/:421`). REMAINING: offline-baked voice WAVs (graceful synth fallback until then).
+- [ ] **Later — deeper Xenakis (GENDYN, sieves, arborescences) + glitch axis.** (Absent from engine — see `AUDIO_LATER_PLAN.md`.)
 
 ---
 

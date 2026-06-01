@@ -192,7 +192,7 @@ void VesselSplats::update(float kfFloat, float time) {
         p += Vec3f(jhash(s) - 0.5f, jhash(s + 1) - 0.5f, jhash(s + 2) - 0.5f) * (sg * 1.0f);  // tighter -> denser
       }
       mesh_.vertex(p.x, p.y, p.z);
-      mesh_.color(col.x, col.y, col.z, d == 0 ? op * 0.40f : op * 0.14f);   // many overlapping grains -> low per-grain alpha
+      mesh_.color(col.x, col.y, col.z, d == 0 ? op * 0.90f : op * 0.55f);   // crisp source-coloured points (alpha-composited, not additive)
       mesh_.texCoord(std::min(3.f, sg / 0.5f), 0.f);   // size factor (melt swells the splats)
     }
   }
@@ -229,7 +229,7 @@ void VesselSplats::draw(Graphics& g, const Vec3f& center, float scale, float alp
   if (!shader_ok_ || alpha <= 0.001f) return;
   g.depthTesting(false);
   g.blending(true);
-  g.blendAdd();
+  g.blendTrans();                                   // NO BLOOM: normal alpha compositing, not additive glow
   g.shader(shader_);
   g.shader().uniform("uPointSize", point_size_);
   g.shader().uniform("uCore",      core_sigma_);
@@ -237,8 +237,8 @@ void VesselSplats::draw(Graphics& g, const Vec3f& center, float scale, float alp
   g.shader().uniform("uHaloStr",   halo_strength_);
   g.shader().uniform("uIntensity", intensity_);
   g.shader().uniform("uAlpha",     alpha);
-  g.shader().uniform("uTint",      Vec3f(1.00f, 0.72f, 0.30f));  // distinct vessel hue (amber-gold) vs the web/galaxy
-  g.shader().uniform("uTintAmt",   0.70f);
+  g.shader().uniform("uTint",      Vec3f(1.f, 1.f, 1.f));        // unused now (uTintAmt 0)
+  g.shader().uniform("uTintAmt",   0.0f);                        // COLOUR LIKE THE SOURCE IMAGE: keep the baked photo rgb
   g.pushMatrix();
   g.translate(center.x, center.y, center.z);
   g.scale(scale);

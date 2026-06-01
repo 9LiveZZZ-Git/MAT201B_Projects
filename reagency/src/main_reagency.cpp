@@ -5,7 +5,22 @@
 // into the galaxy (the human->machine cede). A morphing splat "vessel" sits at the core.
 // Runtime is allolib-only; custom GLSL through al::ShaderProgram.
 #include "al/app/al_App.hpp"
+// Suppress allolib's own -Woverloaded-virtual (DistributedAppWithState<T>::start(uint16_t) intentionally
+// overloads DistributedApp::start() — a vendored-framework design, not ours to change). The pragma must
+// wrap THIS include: the warning's diagnostic location is inside the header, so a later pragma misses it.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Woverloaded-virtual"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
 #include "al/app/al_DistributedApp.hpp"
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #include "al/math/al_Quat.hpp"
 #include "al/math/al_Vec.hpp"
 
@@ -141,6 +156,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     credits_.init(assetDir);                              // v2 T8 persistent THEM credit-envelope
     dreams_.init(assetDir);                               // v2 Phase-2 diffusion dreams at their nodes
     emergence_.init(assetDir);                            // v2 Phase-2 emergence "watch it think"
+    dreams_.setEmergence(&emergence_);                    // every dream forms-from-noise by proximity (all 192)
     detect_.init();                                       // feature B: CV detection HUD (no assets; shader only)
     audio_.init(assetDir, audioIO().framesPerSecond());   // primary-only; scale from manifest.json
     for (int i = 0; i < field.count(); ++i) {          // traceable corpus photos + dream nodes
@@ -148,6 +164,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       if (field.typeOf(i) == 2) dreamNodes_.push_back(i);
     }
     creditsOn_ = field.count() >= 3000;                   // T8 off on the degenerate 877 preview
+
     nav().pos().set(0.0, 0.0, 16.0);
     nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
     // Renderers must not take local nav input — the primary's pose is authoritative.
@@ -372,8 +389,10 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       nav().quat() = Quatd(s.navQuat[3], s.navQuat[0], s.navQuat[1], s.navQuat[2]);
     }
 
-    // The vessel morphs on every node from the synced keyframe position.
-    vessel.update(s.vesselKf, float(s.simTime));
+    // The vessel morphs on every node from the synced keyframe position. *0.5 = HALF SPEED
+    // (the splats were generating/morphing too fast); the synced s.vesselKf is unchanged so any
+    // other reader stays consistent.
+    vessel.update(s.vesselKf * 0.5f, float(s.simTime));
   }
 
   void onDraw(Graphics& g) override {
@@ -386,8 +405,8 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     const float vd = 1.f - dd;
     const float galBright = 0.45f + 0.55f * dd;   // v1 values (pixel size + brightness restored)
     const float webBright = 0.20f + 0.80f * dd;
-    const float vesAlpha  = 0.10f + 0.70f * vd;
-    const float vesScale  = 1.3f + 1.7f * vd;
+    const float vesAlpha  = 0.70f + 0.30f * vd;   // solid crisp points (no-bloom alpha cloud, not additive glow)
+    const float vesScale  = 4.0f + 1.0f * vd;     // BIG — fills the main screen (camera sits ~7 ahead, outside it)
 
     g.clear(0.03f, 0.03f, 0.05f);     // subtly-lifted void (reads better in the dome)
     webs.draw(g, webBright);          // similarity webs under the points
@@ -418,11 +437,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       webs.drawActive(g, cur, nxt, head, nbr, trail, traceBright);
     }
 
-    // The "vessel" at the core — swells into an enveloping shell as we descend, faint central
-    // haze out in the galaxy. SPACE dives straight to it (see diveOverride_).
-    vessel.draw(g, Vec3f(0, 0, 0), vesScale, vesAlpha);
-
-    // Camera-facing axes (for billboards), from the synced pose.
+    // Camera-facing axes + eye (synced pose) — used by the vessel placement and all billboards below.
     Quatd q(s.navQuat[3], s.navQuat[0], s.navQuat[1], s.navQuat[2]);
     Vec3d rgt = q.rotate(Vec3d(1, 0, 0));
     Vec3d upv = q.rotate(Vec3d(0, 1, 0));
@@ -430,6 +445,12 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     const Vec3f camR(float(rgt.x), float(rgt.y), float(rgt.z));
     const Vec3f camU(float(upv.x), float(upv.y), float(upv.z));
     const Vec3f camF(float(fwd.x), float(fwd.y), float(fwd.z));
+    const Vec3f camPos(s.navPos[0], s.navPos[1], s.navPos[2]);
+
+    // The "vessel" — the machine's splat hallucination. FORMED IN FRONT of the eye (centred in view,
+    // tighter so the shape reads) rather than at the core, where the orbit camera sits inside the cloud.
+    // The depth tide still controls its brightness/scale (faint out in the galaxy, swelling in descent).
+    vessel.draw(g, camPos + camF * 6.0f, vesScale, vesAlpha);
 
     // CLASSIFICATION TEXT CULLED (Design C): the floating cluster-centroid word map was removed to
     // de-clutter the galaxy; the machine's per-object classification now lives only in the detection
@@ -479,18 +500,15 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
 
     // v2 THEM register IN THE GALAXY: verified labor stories placed in the cloud, read by proximity
     // as you fly past — legible, and on every dome node (not a primary-only head-locked caption).
-    const Vec3f camPos(s.navPos[0], s.navPos[1], s.navPos[2]);
     stories_.draw(g, camPos, camR, camU);
 
     // v2 Phase-2: the diffusion DREAMS surface at their concatenated galaxy nodes (proximity-read),
     // brighter as the Act-IV turn converges (the confabulation rises as the archive melts). The
     // active-web trace lights their edges as the Conductor passes — the ML connecting its dream points.
+    // ALL 192 dreams now form-from-noise BY PROXIMITY inside DreamLayer (it owns the EmergencePlayer):
+    // each near dream crossfades emergence latents -> resolved image and re-dreams on a slow loop while
+    // you linger. Deterministic from synced camPos + simTime, so no separate attended draw is needed.
     dreams_.draw(g, camPos, camR, camU, 0.60f + 0.40f * turnConverge, float(s.simTime));
-
-    // v2 Phase-2: the emergence "watch it think" — the attended dream forming from noise at its node
-    // (the decoded intermediate diffusion latents). Overlays the resolved dream as it completes.
-    if (s.emergeDream >= 0 && emergence_.has(s.emergeDream))
-      emergence_.draw(g, field.posOf(s.emergeDream), camR, camU, s.emergeDream, s.emergePhase, 1.f);
 
     // -------- feature B: BLOB DETECTION + SORTING, perpetually "running" --------
     // Animate the PRE-BAKED CLIP classification as a live CV read-out. PURE function of synced
@@ -520,9 +538,8 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
           const Vec3f dp = field.posOf(dn);
           const float dist = (dp - camPos).mag();
           if (dist > 4.0f) continue;                              // only the close ones
-          // feature 3 (matched to Design B size-swap): dreams are now BIGGER (DreamLayer WHALF 0.80),
-          // so the reticle grows to fit.
-          detect_.boxHalf_ = 0.80f;
+          // feature 3: dreams are ~3/4 size (DreamLayer WHALF 0.60 per artist), so the reticle matches.
+          detect_.boxHalf_ = 0.60f;
           const float age = (4.0f - dist) * 0.6f;                 // acquire from proximity; no clock
           detect_.drawReticle(g, dp, camR, camU, dn, s.simTime, age, field.densityOf(dn), hudBright);
           // feature 4: deterministically-random rapid class word for the dream too.

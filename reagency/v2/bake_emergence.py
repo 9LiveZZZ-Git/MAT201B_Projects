@@ -15,7 +15,7 @@ ROOT = os.path.dirname(HERE)
 ASSETS = os.path.join(ROOT, "assets")
 EM = os.path.join(ASSETS, "dreams", "emergence")
 
-CELL, COLS = 160, 20      # emergence frames are transient/noisy -> small cells are fine
+CELL, COLS = 160, 46      # 2112 frames -> 7360x7360 (COLS=20 would be 16960 tall > GL_MAX 16384 = silent black)
 
 prov = json.load(open(os.path.join(ASSETS, "dream_provenance.json")))
 nodes = sorted(prov.keys(), key=lambda k: int(k))

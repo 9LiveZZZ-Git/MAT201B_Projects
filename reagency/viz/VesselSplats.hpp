@@ -44,12 +44,13 @@ struct VesselSplats {
   al::ShaderProgram shader_;
   bool              shader_ok_ = false;
 
-  // bloom tunables (match ParticleField; vessel runs a touch bigger/brighter)
-  float point_size_    = 18.f;
-  float core_sigma_    = 0.20f;
+  // 3DGS POINT-CLOUD look (à la SplatFlow): many small, CRISP, source-coloured points on black —
+  // no halo, no over-bright glow, alpha-composited so dark points read too.
+  float point_size_    = 7.f;     // small crisp dots (was 18) so individual splats read, not a blob
+  float core_sigma_    = 0.55f;   // fairly solid small disc (no halo to lean on)
   float halo_sigma_    = 0.55f;
-  float halo_strength_ = 0.55f;
-  float intensity_     = 1.70f;
+  float halo_strength_ = 0.0f;    // NO BLOOM (was 0.55 halo glow)
+  float intensity_     = 1.0f;    // NO BLOOM (was 1.70 over-bright)
 
   bool loadWSWV(const std::string& path);
   void synthesize(int K, int G);

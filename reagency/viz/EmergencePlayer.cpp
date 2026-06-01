@@ -1,12 +1,13 @@
 #include "viz/EmergencePlayer.hpp"
 #include "al/graphics/al_Image.hpp"
+#include "al/graphics/al_OpenGL.hpp"
 #include <cstdio>
 
 namespace wosw {
 
 using namespace al;
 
-static constexpr float WHALF = 0.55f;   // a touch larger than the resolved dream billboard
+static constexpr float WHALF = 0.42f;   // tracks the ~3/4 dream size (0.60), keeps the forming latent ~0.7x the resolved
 
 static const char* kVert = R"GLSL(
 #version 330
@@ -50,6 +51,10 @@ bool EmergencePlayer::loadAtlas(const std::string& path) {
   auto& a = im.array();
   if (a.empty()) return false;
   atlasW_ = int(im.width()); atlasH_ = int(im.height());
+  GLint maxTex = 0; glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTex);   // allolib doesn't check; a too-big atlas goes silently black
+  if (maxTex > 0 && (atlasW_ > maxTex || atlasH_ > maxTex))
+    std::fprintf(stderr, "[wosw] WARNING emergence_atlas %dx%d EXCEEDS GL_MAX_TEXTURE_SIZE %d on this node — will be blank (raise COLS in bake_emergence.py)\n",
+                 atlasW_, atlasH_, int(maxTex));
   tex_.create2D(atlasW_, atlasH_, Texture::RGBA8, Texture::RGBA, Texture::UBYTE);
   tex_.submit(&a[0], Texture::RGBA, Texture::UBYTE);
   tex_.filter(Texture::LINEAR);
