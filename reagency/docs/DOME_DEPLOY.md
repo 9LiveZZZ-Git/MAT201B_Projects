@@ -6,44 +6,52 @@ Derived from a full portability audit of `src/main_reagency.cpp` + every viz/aud
 ## TL;DR
 
 A clone **builds and launches** anywhere (no hardcoded paths, no macOS-only runtime code).
-But two things are NOT in git and must be handled per-deployment:
+Two deployment notes:
 
-1. **Three large runtime assets** are gitignored (regenerable / over GitHub's size limits).
-   Without them the piece still runs but loses the splat vessel, the "watch it think"
-   emergence, and the recorded ghost voices. Ship them with `factory/make_dome_bundle.sh`.
+1. **All runtime assets are in the repo now.** The big two (`vessel.wswv` 57 MB,
+   `emergence_atlas.png` 160 MB) live in **git-LFS**, so each node must `git lfs install` and
+   `git lfs pull` to get the real files instead of pointer stubs. To avoid GitHub's free LFS
+   bandwidth quota (1 GB/month — a few full clones) on a many-node dome, you can instead clone
+   without `lfs pull` and side-load those two via `factory/make_dome_bundle.sh`.
 2. **`distributed_app.toml`** (node roles) is gitignored on purpose. Author it from
    `distributed_app.toml.example`. Without a valid one, dome nodes go black.
 
-Everything degrades gracefully — a missing asset disables its feature with a stderr warning,
-never a crash — so you can stage the deploy and add fidelity incrementally.
+Everything degrades gracefully — a missing/pointer-stub asset disables its feature with a stderr
+warning, never a crash — so you can stage the deploy and add fidelity incrementally.
 
 ## Asset inventory
 
-| In a fresh clone (committed) | Side-load (gitignored) |
-|---|---|
-| `assets/points.bin`, `edges.bin` — CLIP galaxy + webs | `assets/vessel.wswv` (~58 MB) — splat vessel |
-| `assets/atlas_0.png` — human-trace photos | `v2/emergence_atlas.png` (~161 MB) — "watch it think" |
-| `v2/dream_atlas.png` (31 MB) + `dream_pos.txt` — dreams | `assets/audio/voice_*.wav` (~44 MB) — THEM voices |
-| `v2/{stories,credits,captions}_atlas.png` + index/pos | *(`assets/dreams/` raw PNGs — NOT runtime-needed)* |
-| `assets/{labels,words,classify,label_words}.txt`, `manifest.json` | |
-| `assets/audio/*.wav` — ~192 instrument samples | |
+| In the repo — normal git | In the repo — **git-LFS** (`git lfs pull`) | NOT shipped (regenerable) |
+|---|---|---|
+| `assets/points.bin`, `edges.bin` — galaxy + webs | `assets/vessel.wswv` (57 MB) — splat vessel | `assets/dreams/` raw PNGs (479 MB) |
+| `assets/atlas_0.png` — human-trace photos | `v2/emergence_atlas.png` (160 MB) — "watch it think" | `factory/corpus/` source images (746 MB) |
+| `v2/dream_atlas.png` (31 MB) + `dream_pos.txt` | | `factory/work/` bake intermediates |
+| `v2/{stories,credits,captions}_atlas.png` + index/pos | | local pre-install backups |
+| `assets/{labels,words,classify,label_words}.txt`, `manifest.json` | | |
+| `assets/audio/*.wav` — ~192 instrument + 87 voice WAVs | | |
 
-Fallbacks when a side-load asset is absent: vessel → procedural blob; emergence → off (dreams
-still pop in resolved from the committed `dream_atlas.png`); voices → synthesized whisper.
+If a clone skips `git lfs pull`, the two LFS assets arrive as pointer stubs and the loaders fall
+back gracefully: vessel → procedural blob; emergence → off (dreams still pop in resolved from the
+committed `dream_atlas.png`). The raw `dreams/` PNGs are never read at runtime, so they aren't needed.
 
 ## Steps
 
-**1. Clone + submodules, on every node.**
+**1. Clone + submodules + LFS, on every node.**
 ```bash
+git lfs install                                  # REQUIRED first, or LFS assets clone as pointer stubs
 git clone <allolib_playground remote> && cd allolib_playground
 git submodule update --init --recursive
 git -C MAT201B_Projects checkout v2 && git -C MAT201B_Projects pull
+git -C MAT201B_Projects lfs pull                 # fetch vessel.wswv + emergence_atlas.png (the LFS big two)
 ```
-This brings allolib + the committed core assets above.
+This brings allolib + ALL runtime assets: core (points/edges/atlases/text/instrument+voice WAVs)
+plus the two LFS assets. A node is now fully runnable.
 
-**2. Bake the side-load assets once (on the Mac), bundle, copy to every node.**
+**2. (Only to AVOID LFS bandwidth, or to ship freshly re-baked assets) bundle the big two.**
+LFS already delivers `vessel.wswv` + `emergence_atlas.png` on `lfs pull`. Use this path only to
+clone WITHOUT `lfs pull` (then side-load) on a many-node dome, or after re-baking new assets:
 ```bash
-# on the Mac, after baking (see each script's header):
+# on the Mac, after re-baking (see each script's header):
 #   factory/bake_vessel_replicate.py + factory/stage_d_vessel.py  -> assets/vessel.wswv
 #   v2/bake_emergence.py                                          -> v2/emergence_atlas.png
 #   v2/bake_voices.py   (macOS `say` — Mac-only)                  -> assets/audio/voice_*.wav
