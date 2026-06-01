@@ -18,7 +18,10 @@
       2a `rVoice_` router (`AudioEngine.cpp:91`) + real-speech sample on layer-4 EV_WHISPER (`:451`, synth fallback);
       2b `whisperChorus()` (`:241`) + `cChorusN_`/`cFmtShift_` conductor-driven (`:322`); 2c `cEmerge_` (`:335`) +
       per-step `EV_GLITCH=6` (`:336/:421`). REMAINING: offline-baked voice WAVs (graceful synth fallback until then).
-- [ ] **Later — deeper Xenakis (GENDYN, sieves, arborescences) + glitch axis.** (Absent from engine — see `AUDIO_LATER_PLAN.md`.)
+- [x] **Later — deeper Xenakis (GENDYN, sieves, arborescences) + glitch axis** — IMPLEMENTED per `AUDIO_LATER_PLAN.md`
+      (conductor time-authority + sieves/GENDYN-layer10/arborescences/`EV_GLITCH=6` axis; builds + runs clean; sieve rows
+      verified from `points.bin`). AV-sync = decision (a1): techniques key off `act`+`f`, cliff at the visual III→IV edge;
+      FIBSEC 555-cut reconciliation (a2) is a flagged later pass. **Pending: an actual listen** (RT-safe + builds, not yet auditioned).
 
 ---
 

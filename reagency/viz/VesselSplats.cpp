@@ -168,7 +168,8 @@ void VesselSplats::update(float kfFloat, float time) {
   const auto& b = kf_[B];
   // procedural densification: each baked gaussian spawns DENS splats — the center plus jittered
   // satellites filling the gaussian's own sigma volume, so the sparse (~2.7k) cloud reads dense.
-  static constexpr int DENS = 160;  // v2: ~100x the baked gaussian count -> a dense, READABLE solid body
+  static constexpr int DENS = 4;    // high-quality TRELLIS vessels are already dense (G~30000) -> few satellites
+                                    // (was 160 for the sparse G~2765 bake; pair DENS with the wosw_vessel_colab G)
   auto jhash = [](int n) { float x = std::sin(float(n) * 12.9898f) * 43758.5453f; return x - std::floor(x); };
   mesh_.reset();
   mesh_.primitive(Mesh::POINTS);

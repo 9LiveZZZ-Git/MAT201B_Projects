@@ -158,7 +158,11 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     emergence_.init(assetDir);                            // v2 Phase-2 emergence "watch it think"
     dreams_.setEmergence(&emergence_);                    // every dream forms-from-noise by proximity (all 192)
     detect_.init();                                       // feature B: CV detection HUD (no assets; shader only)
-    audio_.init(assetDir, audioIO().framesPerSecond());   // primary-only; scale from manifest.json
+    // LATER tier (SIEVES): 3-bin galaxy-cluster SIZE histogram from points.bin -> bakes the Xenakis
+    // pitch-sieves in AudioEngine::init (kept decoupled from ParticleField via a plain int[3]).
+    int clusterCounts[3] = {0, 0, 0};
+    for (int i = 0; i < field.count(); ++i) { int c = field.clusterOf(i); if (c >= 0 && c < 3) ++clusterCounts[c]; }
+    audio_.init(assetDir, audioIO().framesPerSecond(), clusterCounts, 3);   // primary-only; scale from manifest.json
     for (int i = 0; i < field.count(); ++i) {          // traceable corpus photos + dream nodes
       if (field.typeOf(i) == 0 && field.atlasOf(i) >= 0) heroNodes_.push_back(i);
       if (field.typeOf(i) == 2) dreamNodes_.push_back(i);

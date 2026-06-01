@@ -26,6 +26,10 @@ namespace wosw {
 class AudioEngine {
  public:
   void init(const std::string& assetDir, double sampleRate);
+  // LATER tier (SIEVES): overload that ALSO bakes the pitch-sieves from a plain int[nClusters]
+  // galaxy-cluster size histogram (main_reagency computes it via field.clusterOf). clusterCounts may
+  // be null (procedural galaxy) -> a fixed fallback triple is used. Builds sieves BEFORE ready_ release.
+  void init(const std::string& assetDir, double sampleRate, const int* clusterCounts, int nClusters);
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 
   void onArrival(int node, int type, float density, int cluster);
@@ -51,6 +55,19 @@ class AudioEngine {
   float root_ = 220.f;
   float degHz(int degree) const;
   int   nodeDegree(int node, int cluster) const;
+  // LATER tier (SIEVES, Step 1): three Xenakis pitch-sieves (unions of residual classes mod 12),
+  // baked once in init() from the real points.bin galaxy-cluster SIZES, read-only forever on the
+  // audio thread (benign publish via the ready_ acquire/release). sieveScale_[row][pc]!=0 => that
+  // pitch-class is LIT. When cSieve_>0.5 (Acts III-V) degHz() reinterprets the integer `degree` as
+  // SEMITONES-mod-12 and snaps to the nearest lit pc of the active row (cClusterId_%3). The remap IS
+  // the dramaturgy (the diatonic sweetness curdles into machine-math) -- a future editor must NOT
+  // "fix" it back to mode-steps. cSieve_ is a hard gate stepped in update() off the VISUAL act + within-act
+  // f ramp per AV-sync (a1) (0 Acts I-II; 1 from III; late + incomplete revert in the looping Act V), NOT off
+  // the free-running secT_ wall-clock. sieveScale_ stays decoupled from ParticleField: built from a plain
+  // int[3] histogram passed into the init() overload.
+  int8_t sieveScale_[3][12] = {};
+  std::atomic<float> cSieve_{0.f};
+  void  buildSievesFromCounts(const int* clusterCounts, int nClusters);
 
   // ---------- CC0 sample bank ----------
   struct Sample { std::vector<float> data; float srcSR = 44100.f; float rootHz = 220.f; bool pitched = true; };
@@ -97,6 +114,21 @@ class AudioEngine {
   std::atomic<float> cCut_{1.f}, cFreeze_{0.f};                      // IV TURN: structural CUT to silence + reverb freeze
   // STORY SPINE (THEM: one named worker per phrase) + CC0 sample CHOIR (US: comfort atop their voice)
   std::atomic<float> cStoryDeg_{7.f}, cCostBeat_{0.f};               // worker year->register, wage->difference-tone roughness
+  // LATER tier (GENDYN, Step 2): true 2nd-order Xenakis Dynamic Stochastic Synthesis (layer 10). THEM made
+  // HARSH -- the worker's difference-tone roughness given a body, alternating with WHISPER via cVoiceSel_ so the
+  // THEM foreground is always exactly ONE soloist. cGendyn_ = conductor envelope (orchestration scalar), cGendynHarsh_
+  // = wage-driven harshness (== st.costN, the SAME number that feeds cCostBeat_->cBeat_), cVoiceSel_ = phraseIdx_&1
+  // mux (0 = whisper's turn, 1 = GENDYN's turn). Sim sets per phrase in update(); audio reads at voice-birth only.
+  std::atomic<float> cGendyn_{0.f}, cGendynHarsh_{0.f}; std::atomic<int> cVoiceSel_{0};
+  static constexpr int GSEG = 6;                                     // K=6 breakpoint segments (fits pm[6]/pa[6] exactly)
+  void  fireGendyn();                                                // schedules a layer-10 EV_NOTE (THEM harm-tone soloist)
+  // LATER tier (ARBORESCENCES, Step 3): Metastaseis branching of the layer-2 grain cloud. The moment of
+  // fan-out / capture -- a single attended worker explodes into a sheaf of glissando trajectories (one
+  // becomes a statistical mass). NO new DSP primitive: a per-sample glide of a layer-2 grain's v.hz toward
+  // a stored TARGET (kept in the free v.body slot, sentinel tslot=-9) IS a glissando. cArbor_ = conductor
+  // envelope (peaks Act III). Spread reuses the existing cCloudSpread_ atomic (no second knob). Sim sets
+  // cArbor_ per buffer; the audio fan emitter (a 2nd Poisson clock, arborTimer_) reads it lock-free.
+  std::atomic<float> cArbor_{0.f};
   std::atomic<float> cChoir_{0.f}, cChoirLam_{0.f};                  // washed granular sample-choir amp + density
   std::atomic<float> cSparsity_{0.6f};                              // Eno loop gating: higher = fewer loops survive
   // ---------- PHASE 2 controls (sim -> audio); all read with memory_order_relaxed on the audio thread ----------
@@ -112,6 +144,19 @@ class AudioEngine {
   // 2c per-emergence-STEP glitch params (sim sets, audio glitch handler latches): cStutLen_ shrinks +
   // cCrush_ falls as emg->1 so the image resolves out of glitch into clarity.
   std::atomic<float> cStutLen_{0.f}, cCrush_{0.f};
+  // LATER tier (GLITCH AXIS, Step 4): EV_GLITCH=6 already exists (Phase-2 owns islot 0: the per-emergence-step
+  // master stutter+bitcrush window). This axis owns islot 1-5 (1=bitcrush, 2=stutter, 3=reverse-slam, 4=freeze,
+  // 5=micro-gate) and fires GRID-LOCKED on the audio thread (NOT via the ring) so the edits read as a producer's
+  // splices, never as failure. Sim sets per-act target floats in update() (keyed off the `act` arg + the within-
+  // section `f` ramp, AV-sync decision a1); audio owns the density clock. cGlitchDens_ = P(op|grid hit) envelope;
+  // cGateAmt_ = micro-gate depth (GLITCH_GATE); cGlitchOp_ = the per-act stutter probability x1000 (GLITCH_STUT,
+  // published as an int to stay within the declare-once set -- a slight repurpose of the "op encoder", documented).
+  // cCrush_/cStutLen_ are REUSED from Phase-2 (declared above) -- NOT re-declared. cCrush_ biases the bitcrush
+  // depth (harsher when cCostBeat_ is high); cStutLen_ the stutter window. Glitch ducks under the whisper (half
+  // density) and the big ops (reverse-slam/freeze) gate on the downbeat (euStep_==0). The cliff = a dense
+  // reverse-slam+freeze cluster at the visual III->IV edge (cFreeze_ latched), near-silent through the cut.
+  std::atomic<float> cGlitchDens_{0.f}, cGateAmt_{0.f};
+  std::atomic<int>   cGlitchOp_{0};
 
   // ---------- sim-side state ----------
   std::vector<std::pair<float, int>> mel_;
@@ -136,8 +181,30 @@ class AudioEngine {
   void loadStories(const std::string& assetDir);
   float       actElapsed_ = 0.f; int prevConductAct_ = 1;   // within-section build (evolve, not slam)
   int         lastEmergeStep_ = -1;                         // 2c: sim-thread edge-detect so EV_GLITCH fires once per discrete emergence step
+  // ---------- LATER tier: time-authoritative conductor (Step 0; sim-thread only) ----------
+  // conduct(dt) accumulates secT_ (the FIBSEC golden-mean clock, cut at index 7 = 555 s), derives the
+  // FIBSEC sub-section index -> conductAct_ (advisory), and a within-section ramp conductF_ (0..1). Per the
+  // AV-sync decision (a1) the SHIPPED 5-act palette still keys off the `act` arg + the existing `f` ramp;
+  // secT_/conductAct_/conductF_ are the within-time clock the LATER techniques (GENDYN/SIEVE/ARBOR/GLITCH)
+  // will read. They make NO sound on their own. Read on the sim thread in update(); a renderer may read them
+  // via WoSWState later if AV lockstep needs it.
+  float       secT_ = 0.f; int conductAct_ = 1; float conductF_ = 0.f;
+  void        conduct(float dt);                            // advances secT_; sets conductAct_/conductF_
 
   // ---------- audio-side voices ----------
+  // LATER tier (GENDYN, Step 2) layer-10 ALIAS MAP (no struct growth): layer-10 voices NEVER enter the
+  // formant (layer 4) or generic-additive paths, so they freely REUSE existing scratch fields ---
+  //   breakpoint durations d[k]   -> pm[k]           (k in [0,GSEG))
+  //   breakpoint amplitudes a[k]  -> pa[k]
+  //   time-velocities      vT[k]  -> fcoef[k/3][k%3] (9 free slots; GSEG=6 fits)
+  //   amp-velocities       vA[k]  -> fz_[k/2][k%2]   (6 free slots; GSEG=6 fits)
+  //   segment count               -> syl
+  //   fundamental (Hz)            -> hz
+  //   walk / read phase           -> phase
+  //   harshness h                 -> body
+  //   foldback drive (cached)     -> lp
+  // Invariant: a layer==10 voice must be dispatched by the layer-10 tickVoice() branch ONLY (placed above the
+  // generic additive path); it must never fall through to the formant/additive code that would clobber these.
   struct Voice {
     bool  on = false; int layer = 0;
     float hz = 220, amp = 0, pan = 0, age = 0, life = 1, atk = 0.02f;
@@ -165,6 +232,7 @@ class AudioEngine {
   static constexpr int CAPN = 1 << 16;
   std::array<float, CAPN> cap_{}; int capPos_ = 0; float granTimer_ = 0.f, cut_ = 1.f, freeze_ = 0.f;
   float choirTimer_ = 0.f;                             // Poisson clock for the sample choir
+  float arborTimer_ = 0.f;                             // LATER (ARBOR): 2nd Poisson clock for the Metastaseis fan emitter
   // Eno generative loops: 8 coprime Fibonacci-length step-loops that phase against each other (never repeat
   // in 14 min). loopStep_ advances one per beat; loop fires when its step wraps, gated by cSparsity_.
   static constexpr int NLOOP = 8;
@@ -190,6 +258,19 @@ class AudioEngine {
   float stutBufL_[STUTN] = {}, stutBufR_[STUTN] = {}; int stutWr_ = 0;
   int   glitchT_ = 0, glitchLen_ = 0, stutPeriod_ = 0, stutRead_ = 0;
   float crushAmt_ = 0.f, crushHoldL_ = 0.f, crushHoldR_ = 0.f; int crushPhase_ = 0, crushStride_ = 1;
+  // LATER tier (GLITCH AXIS, Step 4) audio-owned state (no atomics; lives only on the audio thread). The Step-4
+  // CONTINUOUS bitcrush (islot 1) sample-and-holds the master L/R on crushPh_ (re-quantizing at a crush-rate <
+  // sr_); crushHoldL_/crushHoldR_ are REUSED from Phase-2's window crush (the two crush domains are partitioned:
+  // Step-4 crush is skipped while Phase-2's islot-0 window is active -> no fight). crushBits_ is REPURPOSED as a
+  // per-sample ARMED COUNTDOWN (>0 = crushing; re-armed on a bitcrush grid hit, decremented per sample); the live
+  // bit-depth is read from cCrush_/cCostBeat_ each hold. microGate_/microGateTgt_ = the glided master micro-gate
+  // (islot 5; target re-rolled per grid hit). stutOrigin_ (cap_ window start) + stutPlay_ (window length in
+  // samples) drive the stutter/freeze-loop wrap in tickVoice() for tslot==-11 cap_ voices. freezeHold_ = a grid-
+  // step countdown that forces the SINGLE existing reverb freeze_ high (NO 2nd reverb-freeze, NO race on cFreeze_).
+  // capRms_ = a one-pole RMS of the cap_ (whisper-lead) writes -- the silence guard: stutter/reverse/freeze fire
+  // only when capRms_>threshold (crush/micro-gate operate on the full master bus, which always has material).
+  float crushPh_ = 0.f, microGate_ = 1.f, microGateTgt_ = 1.f, stutPlay_ = 0.f, capRms_ = 0.f;
+  int   stutOrigin_ = 0, freezeHold_ = 0, crushBits_ = 0;
   float duckGain_ = 1.f, lowDuck_ = 1.f, kickDuck_ = 1.f;   // bed + low-end duck under whisper; sub sidechain vs kick
   // arrangement gates (glided) + dubstep growl LFO/filter + ping-pong delay (grains+whispers)
   float growl_ = 0.f, gate_[NGATE] = {};               // smoothed per-element dropout gates (audio)
@@ -212,6 +293,7 @@ class AudioEngine {
   void fireTimp();          // pitched timpani on the 2nd Euclidean
   void fireClang();         // industrial metallic FX
   void fireAnd();           // subtle off-beat "and" tick accenting the main beat
+  void fireGlitch(float activity, bool whisperOn);   // LATER (GLITCH AXIS): grid-locked edit bus (islot 1-5)
   float jiBassHz() const;
 };
 
