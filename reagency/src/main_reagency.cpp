@@ -282,7 +282,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
         // stable per-node pseudo-vocalisation is whispered instead).
         const float tpan = panOf(field.posOf(node));
         audio_.traceOn(slot, node, tpan);
-        audio_.whisper(labels.wordForNode(node), node, tpan);
+        audio_.whisperChorus(labels.wordForNode(node), node, tpan, 0, 0.25f);   // 2b: n=0 -> conductor's cChorusN_; spread fans the ghosts
       }
 
       // Manual dive override (SPACE): ease toward the core, layered on the 5-act depth envelope
@@ -364,7 +364,8 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       // AUDIO continuous controls + the 5-ACT orchestration: each act has its own palette
       // (I seduction -> II reading -> III extraction grind -> IV bare-pulse turn -> V haunted residue).
       audio_.update(float(dt), s.hesitation, s.depth, conductor.progress(),
-                    panOf(Vec3f(s.focusPos[0], s.focusPos[1], s.focusPos[2])), act);
+                    panOf(Vec3f(s.focusPos[0], s.focusPos[1], s.focusPos[2])), act,
+                    s.emergePhase, s.emergeDream >= 0);   // 2c: feed the SYNCED dream-emergence (sim thread, primary)
     } else {
       // apply the primary's exact pose (Quatd is w,x,y,z)
       nav().pos().set(s.navPos[0], s.navPos[1], s.navPos[2]);

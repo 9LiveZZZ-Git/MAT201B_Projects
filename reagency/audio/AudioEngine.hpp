@@ -32,8 +32,14 @@ class AudioEngine {
   void igniteArp(const std::vector<std::pair<int, float>>& nbrs, int cluster);
   void traceOn(int slot, int node, float pan);
   void traceOff(int slot);
-  void whisper(const std::string& word, int node, float pan);
-  void update(float dt, float hesitation, float depth, float progress, float focusPan, int act = 1);
+  // 2a/2b: whisper() gains optional per-voice chorus detune (ratio, 1=center) + pan-spread fraction (-1..1);
+  // defaults keep every existing whisper() callsite source-compatible.
+  void whisper(const std::string& word, int node, float pan, float detune = 1.f, float spreadFrac = 0.f);
+  void whisperChorus(const std::string& word, int node, float pan, int n, float spread);   // 2b: n<=0 -> use cChorusN_; 1..5 explicit
+  // 2c: emergePhase/emergeActive carry the SYNCED runtime emergence (WoSWState.emergePhase / emergeDream>=0)
+  // from the SIM thread into cEmerge_. The audio thread never reads WoSWState. Defaulted -> source-compatible.
+  void update(float dt, float hesitation, float depth, float progress, float focusPan, int act = 1,
+              float emergePhase = 0.f, bool emergeActive = false);
 
   void render(al::AudioIOData& io);
 
@@ -50,7 +56,7 @@ class AudioEngine {
   struct Sample { std::vector<float> data; float srcSR = 44100.f; float rootHz = 220.f; bool pitched = true; };
   struct Role   { int idx[64]; int n = 0; int rr = 0; };
   std::vector<Sample> samples_;
-  Role rBass_, rPluck_, rBell_, rTrace_, rTimp_, rMetal_;
+  Role rBass_, rPluck_, rBell_, rTrace_, rTimp_, rMetal_, rVoice_;   // 2a: rVoice_ = real ghostly-voice/speech WAVs (THEM made literal)
   void loadSamples(const std::string& assetDir);
   int  pickSample(Role& r, float hz);
   void loadWords(const std::string& assetDir);            // real on-theme words for the whisper
@@ -59,7 +65,7 @@ class AudioEngine {
 
   // ---------- lock-free event ring (SPSC) ----------
   struct Ev { int kind; float hz, amp, pan; int layer, islot; float a, b, c; int vow = 0; };  // vow = packed vowel sequence
-  enum { EV_NOTE = 0, EV_TRACE_ON = 1, EV_TRACE_OFF = 2, EV_WHISPER = 3, EV_RHYTHM = 4, EV_RHYTHM2 = 5 };
+  enum { EV_NOTE = 0, EV_TRACE_ON = 1, EV_TRACE_OFF = 2, EV_WHISPER = 3, EV_RHYTHM = 4, EV_RHYTHM2 = 5, EV_GLITCH = 6 };  // 2c: per-emergence-step master glitch (no voice). EV_LOOP=6 never existed; 6 is the next free value.
   static constexpr int RING = 1024;
   std::array<Ev, RING>  ring_{};
   std::atomic<uint32_t> rHead_{0}, rTail_{0};
@@ -93,6 +99,19 @@ class AudioEngine {
   std::atomic<float> cStoryDeg_{7.f}, cCostBeat_{0.f};               // worker year->register, wage->difference-tone roughness
   std::atomic<float> cChoir_{0.f}, cChoirLam_{0.f};                  // washed granular sample-choir amp + density
   std::atomic<float> cSparsity_{0.6f};                              // Eno loop gating: higher = fewer loops survive
+  // ---------- PHASE 2 controls (sim -> audio); all read with memory_order_relaxed on the audio thread ----------
+  std::atomic<int>   cChorusN_{1};                                  // 2b: ghosts per on-image whisper (1..5); peaks in Act V
+  std::atomic<float> cChorusDet_{0.f};                             // 2b: max per-voice detune span (semitones)
+  std::atomic<float> cFmtShift_{1.f};                             // 2b: place->throat formant scale
+  std::atomic<float> cVoiceRough_{0.f};                           // 2b: wage->strain (widens formant bandwidths)
+  std::atomic<float> cGranSmear_{0.f};                            // 2b: extra scatter added on the voice-shred read
+  // 2c DREAM-EMERGENCE: cEmerge_ is NOT in Phase 1 (grep-verified) -> declared here. Synced runtime emergence
+  // (sim sets it in update() from WoSWState.emergePhase + a conductor envelope). Read INVERSELY in render():
+  // shepGain*=(1-emg), cGranScat*=(1-emg), pad-floor*=emg -> crossfade Shepard-noise -> harmonic pad.
+  std::atomic<float> cEmerge_{0.f};
+  // 2c per-emergence-STEP glitch params (sim sets, audio glitch handler latches): cStutLen_ shrinks +
+  // cCrush_ falls as emg->1 so the image resolves out of glitch into clarity.
+  std::atomic<float> cStutLen_{0.f}, cCrush_{0.f};
 
   // ---------- sim-side state ----------
   std::vector<std::pair<float, int>> mel_;
@@ -116,6 +135,7 @@ class AudioEngine {
   std::size_t storyIdx_ = 0; float phraseT_ = 0.f; int phraseIdx_ = 0;
   void loadStories(const std::string& assetDir);
   float       actElapsed_ = 0.f; int prevConductAct_ = 1;   // within-section build (evolve, not slam)
+  int         lastEmergeStep_ = -1;                         // 2c: sim-thread edge-detect so EV_GLITCH fires once per discrete emergence step
 
   // ---------- audio-side voices ----------
   struct Voice {
@@ -164,6 +184,12 @@ class AudioEngine {
   float fxTimer_ = 6.f;                                // industrial-clang scheduler
   float grainTimer_ = 0.f; uint32_t rng_ = 0x9E3779B9u; float frand();
   int   lastClusterId_ = -999;
+  // 2c emergence + glitch (audio-side, ALL fixed/preallocated — zero alloc on the audio thread):
+  float emerge_ = 0.f;                                  // glided cEmerge_ (one-pole ~0.4 s, click-free)
+  static constexpr int STUTN = 1 << 12;                 // 4096 frames (~93 ms @ 44.1k) stutter capture
+  float stutBufL_[STUTN] = {}, stutBufR_[STUTN] = {}; int stutWr_ = 0;
+  int   glitchT_ = 0, glitchLen_ = 0, stutPeriod_ = 0, stutRead_ = 0;
+  float crushAmt_ = 0.f, crushHoldL_ = 0.f, crushHoldR_ = 0.f; int crushPhase_ = 0, crushStride_ = 1;
   float duckGain_ = 1.f, lowDuck_ = 1.f, kickDuck_ = 1.f;   // bed + low-end duck under whisper; sub sidechain vs kick
   // arrangement gates (glided) + dubstep growl LFO/filter + ping-pong delay (grains+whispers)
   float growl_ = 0.f, gate_[NGATE] = {};               // smoothed per-element dropout gates (audio)
