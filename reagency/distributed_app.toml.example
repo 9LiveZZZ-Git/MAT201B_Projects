@@ -1,0 +1,45 @@
+# distributed_app.toml.example -- AlloSphere node/role config for World of Shadow Work.
+#
+# WHY THIS IS A .example: the live file `distributed_app.toml` is .gitignored on purpose
+# (a stale/empty one forces a node to launch as a primary-less SECONDARY -> black screen).
+# So this committed template TRAVELS with the clone; on the dome you copy it to the real
+# name and fill in your site's broadcast address + hostnames:
+#
+#     cp distributed_app.toml.example distributed_app.toml      # then edit the two things below
+#
+# allolib (al::DistributedApp) reads "distributed_app.toml" from the CURRENT WORKING DIRECTORY
+# at start(). It matches the running machine's HOSTNAME against the [[node]] table to decide
+# whether that instance is the primary (simulates + audio + broadcasts WoSWState) or a
+# renderer (receives state, draws with omni/dome warp). If no node matches / no file is found,
+# it primary-if-port-free, else secondary-on-localhost (fine for ONE desktop, wrong for the dome).
+#
+# Format is exactly allolib's documented schema (al/app/al_DistributedApp.hpp):
+
+# (1) EDIT: the dome subnet's BROADCAST address (used for UDP state distribution).
+broadcastAddress = "192.168.10.255"
+
+# (2) EDIT: one [[node]] per machine. host = the machine's actual hostname.
+#     rank 0 / role "desktop"  = the PRIMARY (control + sim + audio). Exactly one.
+#     rank 1 / role "renderer" = each dome render node (draws the synced frame). Add as many as the dome has.
+[[node]]
+  host = "ar01.1g"        # <- primary / control machine hostname
+  rank = 0
+  role = "desktop"
+
+[[node]]
+  host = "gr02"           # <- render node 1 hostname
+  rank = 1
+  role = "renderer"
+
+[[node]]
+  host = "gr03"
+  rank = 1
+  role = "renderer"
+
+[[node]]
+  host = "gr04"
+  rank = 1
+  role = "renderer"
+
+# Place an IDENTICAL filled-in copy in the exact cwd each node launches the binary from,
+# and distribute it out-of-band (rsync/scp/config-mgmt) -- NOT via git (it's ignored).
