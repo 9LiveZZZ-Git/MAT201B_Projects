@@ -815,8 +815,8 @@ void AudioEngine::render(al::AudioIOData& io) {
   shepGain_ *= (1.f - 0.9f * emerge_);   // 2c INVERSE: as the image forms, the rising Shepard-NOISE bed recedes (faint air remains)
   shepRateTgt_ = (hes > 0.55f ? -1.f : 1.f) * (1.f / (80.f - 40.f * hes)); shepRate_ += (shepRateTgt_ - shepRate_) * gco(8.f, nf, sr_);   // near-static (~80 s/cycle)
   bool whisperOn = false; for (auto& v : vox_) if (v.on && v.layer == 4) { whisperOn = true; break; }
-  duckGain_ += ((whisperOn ? 0.6f : 1.f) - duckGain_) * gco(0.25f, nf, sr_);
-  lowDuck_  += ((whisperOn ? 0.8f : 1.f) - lowDuck_) * gco(0.25f, nf, sr_);
+  duckGain_ += ((whisperOn ? 0.78f : 1.f) - duckGain_) * gco(0.25f, nf, sr_);   // gentler duck: keep the bed present under voices (was 0.6 -> read as "dropping out")
+  lowDuck_  += ((whisperOn ? 0.90f : 1.f) - lowDuck_) * gco(0.25f, nf, sr_);
   // arrangement gates: drone pause / ensemble drop-outs / dubstep growl (glided, no clicks)
   for (int i = 0; i < NGATE; ++i)
     gate_[i] += (cGate_[i].load(std::memory_order_relaxed) - gate_[i]) * gco(cGateTau_[i].load(std::memory_order_relaxed), nf, sr_);
@@ -1055,6 +1055,7 @@ void AudioEngine::render(al::AudioIOData& io) {
     float ppSendL = 0.f, ppSendR = 0.f, sampSend = 0.f;
     for (auto& v : vox_) {
       if (!v.on) continue; float s = tickVoice(v, isr, depth, moodLP_);
+      if (!std::isfinite(s)) { v.on = false; continue; }   // SAFETY: a blown voice (unstable filter / hot sample) can't NaN-poison the bus -> no mute
       if (v.layer == 0) s *= gate_[G_MEL]; else if (v.layer == 1) s *= gate_[G_BELL]; else if (v.layer == 7) s *= gate_[G_TIMP];   // per-element dropouts
       if (v.layer == 4) {                                  // whisper: lead (gated), and into the delay
         float pp = 0.5f * (v.pan + drift + 1.f); pp = pp < 0 ? 0 : (pp > 1 ? 1 : pp);
@@ -1088,9 +1089,11 @@ void AudioEngine::render(al::AudioIOData& io) {
     cap_[capPos_] = leadL + leadR; capPos_ = (capPos_ + 1) & (CAPN - 1);   // capture the whisper lead for granulation
     capRms_ += (std::fabs(leadL + leadR) - capRms_) * 0.0008f;             // LATER (GLITCH): silence guard one-pole on cap_ writes
     revSend *= (1.f - 0.9f * freeze_);                                     // IV freeze: cut the reverb FEED; its tail rings on
+    if (!std::isfinite(revSend)) revSend = 0.f;                            // SAFETY: never feed the reverb a NaN (it would ring forever -> mute)
     float w1 = 0.f, w2 = 0.f; reverb_(revSend * 0.5f, w1, w2, 0.6f);
     float L = busyGain * cut_ * (duckGain_ * bedL + leadL + lowDuck_ * lowMono + reverbWet_ * w1);   // cut_ = IV structural silence
     float R = busyGain * cut_ * (duckGain_ * bedR + leadR + lowDuck_ * lowMono + reverbWet_ * w2);
+    if (!std::isfinite(L)) L = 0.f; if (!std::isfinite(R)) R = 0.f;        // SAFETY: keep the master feedback + output finite (no persistent mute)
     masterLoL_ = dn(masterLoL_ + aLo * (L - masterLoL_)); L += 2.16f * masterLoL_;
     masterLoR_ = dn(masterLoR_ + aLo * (R - masterLoR_)); R += 2.16f * masterLoR_;
     masterHiL_ = dn(masterHiL_ + aHi * (L - masterHiL_)); L += 0.45f * (masterHiL_ - L);   // pink HF tilt
