@@ -508,6 +508,10 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
   // per-element dropout TEXTURES within the act palette (an act-silent layer stays silent)
   auto dr = [&]() { dprng_ ^= dprng_ << 13; dprng_ ^= dprng_ >> 17; dprng_ ^= dprng_ << 5; return float(dprng_) / 4294967296.f; };
   for (int i = 0; i < NGATE; ++i) {
+    // VOICE PROTECTION: do NOT let the dropout scheduler silence the whisper/voice layer in the acts
+    // where THEM leads (II READING / III EXTRACTION / IV TURN) -> the testimonies stay present (the bed
+    // still ducks + thins around them; the voice itself just never vanishes for 25-45 s mid-phrase).
+    if (i == G_WHISPER && a >= 2 && a <= 4) { dropTgt_[i] = 1.f; cGate_[i].store(aGate[i], std::memory_order_relaxed); continue; }
     dropT_[i] -= dt;
     if (dropT_[i] <= 0.f) {
       bool on = dropTgt_[i] > 0.5f;
@@ -720,7 +724,9 @@ void AudioEngine::fireGlitch(float activity, bool whisperOn) {
         int gi = allocCapped(2, 28); if (gi >= 0) { Voice& g = vox_[gi]; g = Voice{};
           g.on = true; g.layer = 2; g.tslot = -11; g.smp = cap_.data(); g.smpLen = CAPN;
           g.smpPos = float((capPos_ - 64 + CAPN) & (CAPN - 1)); g.smpRate = -1.f;   // negative rate -> reverse (no wrap)
-          g.life = 1.0f; g.atk = 0.3f; g.amp = 0.12f; g.pan = 0.f; g.grng = rng_ ^ uint32_t(gi * 2654435761u); }
+          float revAvail = g.smpPos / float(sr_);                                   // reverse audio available before smpPos<0
+          g.life = std::min(1.0f, revAvail); g.atk = std::min(0.30f, 0.30f * g.life);  // length-bound: a ring-wrap no longer leaves a dead 1.0s/0.3s-atk envelope
+          g.amp = 0.12f; g.pan = 0.f; g.grng = rng_ ^ uint32_t(gi * 2654435761u); }
       }
     }
     freezeHold_ = 2;                                               // hold the SINGLE reverb freeze ~2 grid steps
@@ -756,7 +762,9 @@ void AudioEngine::fireGlitch(float activity, bool whisperOn) {
     int gi = allocCapped(2, 28); if (gi >= 0) { Voice& g = vox_[gi]; g = Voice{};
       g.on = true; g.layer = 2; g.tslot = -11; g.smp = cap_.data(); g.smpLen = CAPN;
       g.smpPos = float((capPos_ - 64 + CAPN) & (CAPN - 1)); g.smpRate = -1.f;
-      g.life = 1.0f; g.atk = 0.3f; g.amp = 0.10f; g.pan = 0.f; g.grng = rng_ ^ uint32_t(gi * 2246822519u); }
+      float revAvail = g.smpPos / float(sr_);
+      g.life = std::min(1.0f, revAvail); g.atk = std::min(0.30f, 0.30f * g.life);   // length-bound the reverse-slam (see cliff arm)
+      g.amp = 0.10f; g.pan = 0.f; g.grng = rng_ ^ uint32_t(gi * 2246822519u); }
   } else if (capLive && gc < 6 && downbeat && r < stutPr + 0.45f) {   // islot 4: FREEZE (latched looped window + reverb freeze)
     int win = CAPN / 16; stutPlay_ = float(win);                    // ~0.09 s window @ 44.1k
     stutOrigin_ = (capPos_ - win + CAPN) & (CAPN - 1); if (stutOrigin_ + win >= CAPN) stutOrigin_ = CAPN - win - 1;
@@ -1062,7 +1070,7 @@ void AudioEngine::render(al::AudioIOData& io) {
       if (v.layer == 4) {                                  // whisper: lead (gated), and into the delay
         float pp = 0.5f * (v.pan + drift + 1.f); pp = pp < 0 ? 0 : (pp > 1 ? 1 : pp);
         float cL = std::cos(pp * 1.5707963f), cR = std::sin(pp * 1.5707963f);
-        leadL += gate_[G_WHISPER] * 0.85f * s * cL; leadR += gate_[G_WHISPER] * 0.85f * s * cR;          // lower
+        leadL += gate_[G_WHISPER] * 1.0f * s * cL; leadR += gate_[G_WHISPER] * 1.0f * s * cR;            // voices a bit louder (0.85 -> 1.0, ~+1.4 dB)
         ppSendL += gate_[G_WHISPER] * 0.12f * s * cL; ppSendR += gate_[G_WHISPER] * 0.12f * s * cR; revSend += s * gate_[G_WHISPER] * 0.7f;   // blend more with the global verb
         sampSend += s * gate_[G_WHISPER] * 0.6f;                                                     // short MONO reverb on the whisper
       } else if (v.layer == 9) { leadL += 1.05f * s; leadR += 1.05f * s; ppSendL += 0.4f * s; ppSendR += 0.4f * s; }   // "and" tick: dry + into the ping-pong delay

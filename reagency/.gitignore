@@ -38,3 +38,6 @@ assets_pre_qwen_*/
 # emergence_atlas.png (~29 MB) is too big for git; the small credits_atlas + the *_index/_pos txt
 # (the source-of-truth metadata) and dream_atlas.png stay tracked.
 v2/emergence_atlas.png
+
+# Phase-2 2a voice WAVs — regenerable via v2/bake_voices.py (macOS say), not committed
+assets/audio/voice_*.wav
