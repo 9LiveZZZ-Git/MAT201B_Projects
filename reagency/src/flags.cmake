@@ -48,3 +48,11 @@ endif()
 
 set(app_link_libs reagency_support)
 set(app_compile_flags -std=c++14)   # AlloSphere toolchain has no C++17; build the whole project as C++14 (allolib is C++14)
+
+# Cuttlebone state distribution: the playground top-level CMake already links ${AL_EXT_LIBRARIES}
+# into every app, which includes al_statedistribution (carrying PUBLIC AL_USE_CUTTLEBONE + the
+# cuttlebone/ include dir) on Linux/Darwin. So linking is free on this route; we only need to set
+# our include-guard macro so main_reagency.cpp pulls the cuttlebone header. Windows stays OSC-only.
+if(CMAKE_SYSTEM_NAME MATCHES "Linux" OR CMAKE_SYSTEM_NAME MATCHES "Darwin")
+  set(app_definitions ${app_definitions} WOSW_HAVE_CUTTLEBONE)
+endif()

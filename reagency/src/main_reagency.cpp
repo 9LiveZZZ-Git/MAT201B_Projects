@@ -21,6 +21,26 @@
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
+// Cuttlebone state distribution (al_ext) — the dome's reliable fragmented-UDP-broadcast transport,
+// superseding the base class's size-limited OSC StateDistributionDomain. Guarded by
+// WOSW_HAVE_CUTTLEBONE, which the build defines ONLY when al_statedistribution is linked
+// (Linux/Darwin); a build without it compiles out cleanly and keeps the OSC path.
+#if defined(WOSW_HAVE_CUTTLEBONE)
+#include <iostream>   // enable/fallback log lines in onInit()
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Woverloaded-virtual"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
+#include "al_ext/statedistribution/al_CuttleboneStateSimulationDomain.hpp"
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+#endif  // WOSW_HAVE_CUTTLEBONE
 #include "al/math/al_Quat.hpp"
 #include "al/math/al_Vec.hpp"
 
@@ -52,6 +72,10 @@ using namespace wosw;
 // nodes apply the synced camera and draw identically. On a single desktop the one
 // node is primary, so this is also the dev/preview app.
 struct WoSW : public DistributedAppWithState<WoSWState> {
+#if defined(WOSW_HAVE_CUTTLEBONE)
+  // Held for the app's lifetime so the cuttlebone simulation domain stays alive (set in onInit()).
+  std::shared_ptr<CuttleboneStateSimulationDomain<WoSWState>> cuttleboneDomain;
+#endif
   ParticleField field;
   WebRenderer   webs;
   Conductor     conductor;
@@ -141,6 +165,23 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   static constexpr float DWELL_EPS_P = 0.02f;   // positional delta/frame under which the pose "dwells"
   static constexpr float DWELL_EPS_A = 0.01f;   // angular (1-|dot|) delta/frame threshold
   std::string   assetDir = "assets";
+
+  // Opt into cuttlebone UDP-broadcast state distribution for the dome. MUST run before the domains
+  // start (hence onInit, not onCreate). Primary -> Maker (sender), renderers -> Taker (receivers),
+  // chosen internally by isPrimary(). On failure (cuttlebone not compiled in, or socket bind fails)
+  // we deliberately do NOT quit(): the base class's OSC StateDistributionDomain stays installed, so
+  // the piece still runs on OSC/local (esp. Mac dev). Roles still come from distributed_app.toml.
+  void onInit() override {
+#if defined(WOSW_HAVE_CUTTLEBONE)
+    cuttleboneDomain =
+        CuttleboneStateSimulationDomain<WoSWState>::enableCuttlebone(this);
+    if (!cuttleboneDomain)
+      std::cerr << "[wosw] cuttlebone unavailable — using OSC state distribution.\n";
+    else
+      std::cout << "[wosw] cuttlebone state distribution enabled (sender="
+                << (cuttleboneDomain->isSender() ? "yes" : "no") << ").\n";
+#endif
+  }
 
   void onCreate() override {
     field.init(assetDir);
