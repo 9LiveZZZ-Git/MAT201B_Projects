@@ -355,6 +355,13 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
     {0.70f, 0.40f, 0.55f}, {0.55f, 0.45f, 0.50f}, {0.35f, 0.85f, 0.35f}, {0.30f, 0.50f, 0.30f}, {0.45f, 0.35f, 0.45f} };
   const float* aGate = ACTG[a];
   section_ = a;
+  // LOW-END INTEREST (per-act): the sub PEDAL gets its own beat-PULSE depth + PRESENCE so it diverges
+  // from the sustained pad (both rode G_DRONE before -> too similar). I/II breathe gently, III grinds,
+  // IV is gone (like G_DRONE), V is sparse + slow.       fb     I      II     III    IV     V
+  static const float SUBPULSE[6] = { 0.f, 0.25f, 0.40f, 0.85f, 0.00f, 0.55f };   // beat-pulse depth (0 steady..1 gated between beats)
+  static const float SUBLEVEL[6] = { 1.f, 0.70f, 0.55f, 1.00f, 0.00f, 0.45f };   // sub-pedal presence (decoupled from the pad)
+  cSubPulse_.store(SUBPULSE[a], std::memory_order_relaxed);
+  cSubLevel_.store(SUBLEVEL[a], std::memory_order_relaxed);
   mbTgt_ = ACTM[a][0]; mdTgt_ = ACTM[a][1]; mwTgt_ = ACTM[a][2];
   cGrowl_.store(a == 3 ? 1.f : (a == 4 ? 0.3f : 0.f), std::memory_order_relaxed);   // the grind in extraction
   if (a == 1) { if (!melodyOn_) { melodyOn_ = true; melNote_ = 0; melTune_ = (melTune_ + 1) % 3; melNoteTimer_ = 0.f; } }
@@ -418,7 +425,7 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
   // floors at 0.6 > the degHz() lattice threshold (0.5), so the V comfort sits ON the alien lattice -- the
   // never-reverting sieve is the audio twin of the monotonic extractionDebt haunt. Makes no sound of its own.
   float sieve = (a >= 3) ? 1.f : 0.f;
-  if (a == 5) sieve = std::max(0.6f, clamp01(1.f - f));
+  if (a == 5) { float fr = clamp01((f - 0.6f) / 0.4f); sieve = std::max(0.6f, 1.f - fr); }
   cSieve_.store(sieve, std::memory_order_relaxed);
   // LATER (GLITCH AXIS, Step 4): per-act target floats for the grid-locked edit bus (islot 1-5). Stored here in
   // update() keyed off the `act` arg + the within-section `f` ramp (AV-sync decision a1) -- consistent with every
@@ -470,6 +477,11 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
       static const float FIBPH[6] = {3.f, 5.f, 8.f, 5.f, 3.f, 2.f};            // phrase length in BEATS (Fibonacci)
       float beat = 1.f / std::max(0.5f, slotRate(depth, hesitation, activity_));
       phraseT_ = FIBPH[phraseIdx_ % 6] * beat; ++phraseIdx_;
+      // LOW-END INTEREST: move the bass NOTE per phrase (root / P5 / P4 / min7), scaled by how active the
+      // act is so the SEDUCTION stays near root and EXTRACTION roams.   fb   I     II     III    IV    V
+      static const float SUBOST[4]  = { 1.0f, 1.5f, 1.3333f, 1.7818f };
+      static const float SUBMOVE[6] = { 0.f, 0.0f, 0.25f, 1.0f, 0.0f, 0.6f };
+      cSubRatio_.store(1.f + SUBMOVE[a] * (SUBOST[phraseIdx_ % 4] - 1.f), std::memory_order_relaxed);
       const Story& st = stories_[storyIdx_ % stories_.size()]; ++storyIdx_;
       cCostBeat_.store(st.costN, std::memory_order_relaxed);
       // historical->low, contemporary->high. Under the SIEVE (cSieve_ live) degHz reads `deg` as
@@ -485,8 +497,8 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
       // harshness, so one worker has two coupled symptoms (pad roughness + soloist grit). Toggle the mux per phrase.
       cGendynHarsh_.store(st.costN, std::memory_order_relaxed);
       cVoiceSel_.store(phraseIdx_ & 1, std::memory_order_relaxed);
-      if (cVoiceSel_.load(std::memory_order_relaxed) == 1) fireGendyn();   // GENDYN's turn -> harm-tone soloist
-      else if (!wordbank_.empty()) whisper(wordbank_[(storyIdx_ * 1103515245u + 12345u) % wordbank_.size()], curNode_, 0.5f * (st.era ? -1.f : 1.f));   // whisper's turn
+      if (cVoiceSel_.load(std::memory_order_relaxed) == 1 && cGendyn_.load(std::memory_order_relaxed) > 0.02f) fireGendyn();   // GENDYN's turn -> harm-tone soloist (only when its envelope is live; ABSENT in EMERGE/Act I)
+      else if (!wordbank_.empty()) whisper(wordbank_[(storyIdx_ * 1103515245u + 12345u) % wordbank_.size()], curNode_, 0.5f * (st.era ? -1.f : 1.f));   // envelope dead OR whisper's turn -> whisper
     }
   }
   // per-element dropout TEXTURES within the act palette (an act-silent layer stays silent)
@@ -610,7 +622,7 @@ float AudioEngine::tickVoice(Voice& v, float isr, float depth, float bright) {
   // wrap smpPos back to the captured window [stutOrigin_, stutOrigin_+stutPlay_) so the slice re-triggers (the
   // machine re-editing the worker's recorded voice). Negative-rate -11 voices are REVERSE-SLAMs -> no wrap (the
   // smpPos<0 check below terminates them). The window is kept inside the ring at arm time, so reads stay in bounds.
-  if (v.tslot == -11 && v.smpRate > 0.f && v.smpPos >= float(stutOrigin_) + stutPlay_) v.smpPos = float(stutOrigin_);
+  if (v.tslot == -11 && v.smpRate > 0.f && v.smpPos >= v.pm[0] + v.pm[1]) v.smpPos = v.pm[0];   // per-voice loop window (pm[0]=origin, pm[1]=len; free scratch -- cap_ voices return at L619 before any pm[] read)
   if (v.smp) { if (v.smpPos >= v.smpLen - 2 || v.smpPos < 0.f) { v.on = false; return 0.f; } int i0 = int(v.smpPos); float fr = v.smpPos - i0; float s = v.smp[i0]*(1.f-fr) + v.smp[i0+1]*fr; v.smpPos += v.smpRate;
     float env; if (v.layer == 3 || v.layer == 5) env = (u < (v.atk/v.life)) ? (u/std::max(1e-4f, v.atk/v.life)) : (u < 0.6f ? 1.f : std::max(0.f, 1.f-(u-0.6f)/0.4f));
     else { float a = v.atk/v.life; env = (u < a) ? (u/std::max(1e-4f,a)) : (u > 0.85f ? (1.f-(u-0.85f)/0.15f) : 1.f); }
@@ -713,19 +725,19 @@ void AudioEngine::fireGlitch(float activity, bool whisperOn) {
 
   const float dens = cGlitchDens_.load(std::memory_order_relaxed);
   if (dens <= 0.f) { microGateTgt_ = 1.f; return; }                // axis OFF (Acts I/V) -> let the master gate re-open
+  microGateTgt_ = (frand() < cGateAmt_.load(std::memory_order_relaxed)) ? 0.f : 1.f;   // islot 5: re-roll per LIT GRID HIT (decoupled from the op-density p) -- gate breathes on every hit (AUDIO_LATER_PLAN.md L197/L216)
   float p = dens * (0.4f + 0.6f * activity) * (whisperOn ? 0.5f : 1.f);   // duck under the whisper (edits fall in the gaps)
   if (frand() >= p) return;
 
   const float crush = cCrush_.load(std::memory_order_relaxed);
   const float stutPr = float(cGlitchOp_.load(std::memory_order_relaxed)) / 1000.f;   // P(stutter | op)
-  const float gateAmt = cGateAmt_.load(std::memory_order_relaxed);
   const bool capLive = capRms_ > 0.0006f;
   int gc = 0; for (auto& v : vox_) if (v.on && v.layer == 2 && v.tslot == -11) ++gc;   // census: glitch cap_-voices <=6
 
   // op pick. stutter (2)/reverse (3)/freeze (4) need a live cap_; reverse+freeze are BIG (downbeat only). crush
   // (1) + micro-gate (5) operate on the full master bus (always have material). The micro-gate target is re-rolled
-  // on EVERY hit so the gate breathes across the section even when no other op is chosen.
-  microGateTgt_ = (frand() < gateAmt) ? 0.f : 1.f;                 // islot 5: re-roll the master micro-gate per hit
+  // above on EVERY LIT GRID HIT (decoupled from this op-density p) so the gate breathes across the section even
+  // when no op is chosen -- per AUDIO_LATER_PLAN.md L197 "crush/micro-gate on any hit" + L216 "re-rolled per grid hit".
   float r = frand();
   if (capLive && gc < 6 && r < stutPr) {                           // islot 2: STUTTER (re-trigger loop over cap_)
     float beat = float(sr_) / std::max(0.5f, slotRate(cDepth_.load(std::memory_order_relaxed), cHesitation_.load(std::memory_order_relaxed), activity));
@@ -734,6 +746,7 @@ void AudioEngine::fireGlitch(float activity, bool whisperOn) {
     stutOrigin_ = (capPos_ - win + CAPN) & (CAPN - 1); if (stutOrigin_ + win >= CAPN) stutOrigin_ = CAPN - win - 1;   // keep window inside the ring
     int gi = allocCapped(2, 28); if (gi >= 0) { Voice& g = vox_[gi]; g = Voice{};
       g.on = true; g.layer = 2; g.tslot = -11; g.smp = cap_.data(); g.smpLen = CAPN; g.smpPos = float(stutOrigin_); g.smpRate = 1.f;
+      g.pm[0] = float(stutOrigin_); g.pm[1] = stutPlay_;          // per-voice loop window (no cross-contamination with a later arm)
       g.life = 0.10f + 0.45f * frand(); g.atk = 0.01f; g.amp = 0.10f; g.pan = 0.18f * (2.f * frand() - 1.f); g.grng = rng_ ^ uint32_t(gi * 40503u); }
   } else if (capLive && gc < 6 && downbeat && r < stutPr + 0.30f) {   // islot 3: REVERSE-SLAM (negative rate; downbeat)
     int gi = allocCapped(2, 28); if (gi >= 0) { Voice& g = vox_[gi]; g = Voice{};
@@ -746,9 +759,11 @@ void AudioEngine::fireGlitch(float activity, bool whisperOn) {
     freezeHold_ = 1 + int(frand() * 2.f);                           // 1-2 grid steps of the SINGLE reverb freeze
     int gi = allocCapped(2, 28); if (gi >= 0) { Voice& g = vox_[gi]; g = Voice{};
       g.on = true; g.layer = 2; g.tslot = -11; g.smp = cap_.data(); g.smpLen = CAPN; g.smpPos = float(stutOrigin_); g.smpRate = 1.f;
+      g.pm[0] = float(stutOrigin_); g.pm[1] = stutPlay_;          // per-voice loop window (no cross-contamination with a later arm)
       g.life = 0.4f + 0.3f * float(freezeHold_); g.atk = 0.03f; g.amp = 0.09f; g.pan = 0.f; g.grng = rng_ ^ uint32_t(gi * 668265263u); }
   } else {                                                          // islot 1: BITCRUSH (arm the per-sample sample-and-hold)
     crushBits_ = int(0.20f * float(sr_));                          // armed ~0.2 s (decremented per sample before the tanh)
+    crushPh_ = 1.f;                                                // force re-latch on sample 0: crushPh_ += inc crosses 1.f -> crushHoldL_/R_ re-quantize the live L/R (no stale-hold click)
     (void)crush;
   }
 }
@@ -851,6 +866,10 @@ void AudioEngine::render(al::AudioIOData& io) {
   float risTempo[RIS], risGain[RIS];
   for (int i = 0; i < RIS; ++i) { float oct = risP_ + float(i) / RIS; oct -= std::floor(oct); risTempo[i] = 0.8f * std::pow(2.f, oct * 4.f); float c = oct * 4.f - 2.f; risGain[i] = std::exp(-0.5f * c * c / (1.3f * 1.3f)); }
 
+  const float gAtk = gco(0.006f, 1, sr_), gRel = gco(0.012f, 1, sr_);   // LATER (GLITCH): master micro-gate one-pole coeffs (constant per buffer; hoisted out of the per-sample loop)
+  const float subPulseAmt = cSubPulse_.load(std::memory_order_relaxed); // LOW-END: per-act sub-pedal pulse depth
+  const float subLevel    = cSubLevel_.load(std::memory_order_relaxed); //          per-act sub-pedal presence
+  const float subRatioTgt = cSubRatio_.load(std::memory_order_relaxed); //          per-phrase low ostinato note
   for (int f = 0; f < nf; ++f) {
     // micro-timing scheduler: fire pending events whose delay elapsed
     for (auto& p : pend_) if (p.used) { if (--p.left <= 0) { trigger(p.e); p.used = false; } }
@@ -876,7 +895,8 @@ void AudioEngine::render(al::AudioIOData& io) {
 
     // sub pedal (centred, dry). In a GROWL section it becomes a dubstep wobble: a resonant SVF
     // whose cutoff + amplitude wobble with wobPhase_, saturated for grit. droneGate pauses it.
-    subHz_ += (padRoot * 0.5f - subHz_) * 0.0004f; subPhase_ += subHz_ * isr; if (subPhase_ >= 1.f) subPhase_ -= 1.f;
+    subRatioCur_ += (subRatioTgt - subRatioCur_) * 0.0006f;   // LOW-END: glide between the per-phrase ostinato notes
+    subHz_ += (padRoot * 0.5f * subRatioCur_ - subHz_) * 0.0008f; subPhase_ += subHz_ * isr; if (subPhase_ >= 1.f) subPhase_ -= 1.f;
     float subS = std::sin(kTAU * subPhase_) + 0.3f * std::sin(kTAU * subPhase_ * 2.f);
     subLp_ = dn(subLp_ + 0.12f * (subS - subLp_));
     float subOut = subLp_;
@@ -897,7 +917,10 @@ void AudioEngine::render(al::AudioIOData& io) {
       float growlHp = g - growlOutLp_;                              // HIGH-PASS: drop the lows off the bass
       subOut = subOut * (1.f - gact) + growlHp * gact * 0.047f;     // wobble down a further ~10 dB
     }
-    lowMono += subOut * subAmp_ * gate_[G_DRONE];
+    // LOW-END INTEREST: beat-synced PULSE (full on the kick-grid onset, dipping to (1-depth) between) +
+    // per-act PRESENCE -> the sub PEDAL pulses + breathes + moves in pitch, no longer a static sine on the pad.
+    float subEnv = (1.f - subPulseAmt) + subPulseAmt * std::exp(-euPhase_ * 5.f);
+    lowMono += subOut * subAmp_ * subLevel * subEnv * gate_[G_DRONE];
     // pure mono triangle SUB-BASS — deep (35 Hz and below), sidechain-GATED against the kick
     float ttgt = padRoot * 0.25f; if (ttgt > 35.f) ttgt = 35.f;          // 35 Hz and below
     triHz_ += (ttgt - triHz_) * 0.0004f; triPhase_ += triHz_ * isr; if (triPhase_ >= 1.f) triPhase_ -= 1.f;
@@ -1107,7 +1130,7 @@ void AudioEngine::render(al::AudioIOData& io) {
         R = crushHoldR_ + (R - crushHoldR_) * (1.f - crush);
       }
     }
-    microGate_ += (microGateTgt_ - microGate_) * gco(microGateTgt_ < microGate_ ? 0.006f : 0.012f, 1, sr_);   // attack faster than release (no pop)
+    microGate_ += (microGateTgt_ - microGate_) * (microGateTgt_ < microGate_ ? gAtk : gRel);   // attack faster than release (no pop)
     L *= microGate_; R *= microGate_;                               // islot 5: master micro-gate
     io.out(0, f) = std::tanh(L * master); if (nch > 1) io.out(1, f) = std::tanh(R * master);
     for (int c = 2; c < nch; ++c) io.out(c, f) = 0.f;

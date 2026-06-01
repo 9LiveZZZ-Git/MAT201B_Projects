@@ -114,6 +114,10 @@ class AudioEngine {
   std::atomic<float> cCut_{1.f}, cFreeze_{0.f};                      // IV TURN: structural CUT to silence + reverb freeze
   // STORY SPINE (THEM: one named worker per phrase) + CC0 sample CHOIR (US: comfort atop their voice)
   std::atomic<float> cStoryDeg_{7.f}, cCostBeat_{0.f};               // worker year->register, wage->difference-tone roughness
+  // LOW-END INTEREST: the sub PEDAL (the "bass drone") stops being a static sine locked to the pad —
+  // per-act beat-PULSE depth, per-act PRESENCE (extra silencing, decoupled from the pad's G_DRONE), and a
+  // per-phrase low NOTE ostinato. Sim-set in update()/the phrase block, audio-read relaxed in render().
+  std::atomic<float> cSubPulse_{0.f}, cSubLevel_{1.f}, cSubRatio_{1.f};
   // LATER tier (GENDYN, Step 2): true 2nd-order Xenakis Dynamic Stochastic Synthesis (layer 10). THEM made
   // HARSH -- the worker's difference-tone roughness given a body, alternating with WHISPER via cVoiceSel_ so the
   // THEM foreground is always exactly ONE soloist. cGendyn_ = conductor envelope (orchestration scalar), cGendynHarsh_
@@ -241,6 +245,7 @@ class AudioEngine {
   float triPhase_ = 0.f, triHz_ = 55.f;                // pure mono triangle SUB-BASS
   float beatPhase_ = 0.f;
   float subPhase_ = 0.f, subAmp_ = 0.f, subLp_ = 0.f, subHz_ = 55.f;
+  float subRatioCur_ = 1.f;                            // glided per-phrase ostinato ratio (no zipper between notes)
   static constexpr int SHEP = 6;
   float shepPhase_ = 0.f, shepPh_[SHEP] = {}, shepBp_[SHEP] = {}, shepRate_ = 0.04f, shepRateTgt_ = 0.04f, shepGain_ = 0.f;  // shepPh_/shepBp_ = noise-bandpass SVF states (L)
   float shepPhR_[SHEP] = {}, shepBpR_[SHEP] = {};      // right-channel SVF bank (independent noise -> stereo Shepard)
