@@ -496,7 +496,11 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
       // cVoiceSel_ (anti-mud rule 1). The SAME wage (st.costN) that drives cBeat_ roughness also sets the GENDYN
       // harshness, so one worker has two coupled symptoms (pad roughness + soloist grit). Toggle the mux per phrase.
       cGendynHarsh_.store(st.costN, std::memory_order_relaxed);
-      cVoiceSel_.store(phraseIdx_ & 1, std::memory_order_relaxed);
+      // per-act GENDYN-vs-WHISPER bias (spec §3.1: I/II off, READ ~1-in-3, EXTRACT/TURN even, V rare/ghostly),
+      // instead of a flat 50/50. Sim-thread mprng_ (same RNG fireGendyn uses) -> deterministic, lock-free.
+      static const float GSEL[6] = {0.f, 0.f, 0.33f, 0.5f, 0.5f, 0.2f};   // index = act a (1..5; 0 fallback)
+      mprng_ ^= mprng_ << 13; mprng_ ^= mprng_ >> 17; mprng_ ^= mprng_ << 5;
+      cVoiceSel_.store((float(mprng_) / 4294967296.f) < GSEL[a] ? 1 : 0, std::memory_order_relaxed);
       if (cVoiceSel_.load(std::memory_order_relaxed) == 1 && cGendyn_.load(std::memory_order_relaxed) > 0.02f) fireGendyn();   // GENDYN's turn -> harm-tone soloist (only when its envelope is live; ABSENT in EMERGE/Act I)
       else if (!wordbank_.empty()) whisper(wordbank_[(storyIdx_ * 1103515245u + 12345u) % wordbank_.size()], curNode_, 0.5f * (st.era ? -1.f : 1.f));   // envelope dead OR whisper's turn -> whisper
     }
@@ -773,7 +777,7 @@ void AudioEngine::fireGendyn() {   // LATER (GENDYN): the THEM harm-tone soloist
   float hz = degHz(int(cStoryDeg_.load(std::memory_order_relaxed))); if (hz < 70.f) hz = 70.f; else if (hz > 440.f) hz = 440.f;
   mprng_ ^= mprng_ << 13; mprng_ ^= mprng_ >> 17; mprng_ ^= mprng_ << 5;
   Ev e{}; e.kind = EV_NOTE; e.layer = 10; e.hz = hz;
-  e.amp = 0.10f + 0.04f * cGendyn_.load(std::memory_order_relaxed);
+  e.amp = 0.06f + 0.12f * cGendyn_.load(std::memory_order_relaxed);   // scale off the conductor envelope (was a near-inert 0.10+0.04*; peak ~preserved, lower acts quieter)
   // STEP 5 anti-mud rule 1: at most ONE foreground stochastic voice. In EXTRACT (Act III) ARBOR is the single
   // F; whenever a fan is active, DEMOTE GENDYN to affect -- amp x0.5, no solo gate -- so it sits UNDER the sheaf
   // (the processed-voice harshness) instead of competing as a second foreground. cArbor_ peaks in III (ARB[3]=1).
