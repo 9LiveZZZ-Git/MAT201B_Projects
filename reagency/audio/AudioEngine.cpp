@@ -1108,7 +1108,7 @@ void AudioEngine::render(al::AudioIOData& io) {
       if (v.layer == 4) {                                  // whisper: lead (gated), and into the delay
         float pp = 0.5f * (v.pan + drift + 1.f); pp = pp < 0 ? 0 : (pp > 1 ? 1 : pp);
         float cL = std::cos(pp * 1.5707963f), cR = std::sin(pp * 1.5707963f);
-        leadL += gate_[G_WHISPER] * 1.5f * s * cL; leadR += gate_[G_WHISPER] * 1.5f * s * cR;            // voices pushed to the FOREGROUND (0.85 -> 1.0 -> 1.5, ~+5 dB over original)
+        leadL += gate_[G_WHISPER] * 1.0f * s * cL; leadR += gate_[G_WHISPER] * 1.0f * s * cR;            // voice level back to 1.0 (1.5 was too over-present)
         ppSendL += gate_[G_WHISPER] * 0.12f * s * cL; ppSendR += gate_[G_WHISPER] * 0.12f * s * cR; revSend += s * gate_[G_WHISPER] * 0.7f;   // blend more with the global verb
         sampSend += s * gate_[G_WHISPER] * 0.6f;                                                     // short MONO reverb on the whisper
       } else if (v.layer == 9) { leadL += 1.05f * s; leadR += 1.05f * s; ppSendL += 0.4f * s; ppSendR += 0.4f * s; }   // "and" tick: dry + into the ping-pong delay

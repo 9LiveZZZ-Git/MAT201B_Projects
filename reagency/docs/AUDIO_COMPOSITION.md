@@ -171,7 +171,8 @@ matter to a listener or a future editor:
   The pervasive glitch-axis ducking (a rhythmic master gate) and the per-frame dream-emergence
   stutters were **disabled** because they fought the composition. A faint continuous bed always
   remains, so the piece never fully stops.
-- **Voices forward** (+~5 dB over the original) so THEM sits clearly out front.
+- **Voice level** — briefly pushed to the foreground (+~5 dB) but that was too over-present, so it's
+  back to its prior clear-but-balanced level (still in front of the now-unducked bed).
 - **−10 dB overall** to compensate the broken house gain.
 - **Condensed from 14 min to 7½ min** (five equal ~90 s acts), keeping the depth/shape and the
   comfort-fail — just compressed.
