@@ -891,7 +891,7 @@ void AudioEngine::render(al::AudioIOData& io) {
   if (std::fabs(decay - lastDecay_) > 1e-3f) { reverb_.decay(decay); lastDecay_ = decay; }
   if (std::fabs(damp - lastDamp_) > 1e-3f) { reverb_.damping(damp); lastDamp_ = damp; }
 
-  const float isr = 1.f / float(sr_), master = 0.28f, outTrim = 0.316f;   // outTrim = -10 dB output trim (AlloSphere console gain broken / piece too loud); applied POST-tanh so it's a true -10 dB
+  const float isr = 1.f / float(sr_), master = 0.28f, outTrim = 1.0f;   // output level back to 0 dB / full (was 0.316 = -10 dB; restore the level)
   const float aLo = 1.f - std::exp(-kTAU * 300.f / float(sr_)), aHi = 1.f - std::exp(-kTAU * 3000.f / float(sr_)), aTop = 1.f - std::exp(-kTAU * 7000.f / float(sr_));
   const float slot = slotRate(depth, hes, act);
   // dubstep growl wobble rate VARIES a lot: re-pick a musical multiple of the beat every ~0.5-2 s,
