@@ -408,10 +408,12 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
   cGranSize_.store(GS[a], std::memory_order_relaxed); cGranScat_.store(GSC[a], std::memory_order_relaxed);
   cGranRev_.store(GRV[a], std::memory_order_relaxed); cGranPitch_.store(GPT[a], std::memory_order_relaxed);
   // IV TURN: latch a structural CUT to silence + reverb freeze on the III->IV edge, hold ~0.35 s
-  if (a == 4 && lastActEdge_ != 4) cutHold_ = 0.35f;
+  // III->IV transition: NO structural cut/freeze anymore (it read as a mistake). Mark the turn with a
+  // SUBTLE master glitch-stutter instead — a brief digital hiccup, never silence. Fired as an EV_GLITCH
+  // on the lock-free ring so the AUDIO thread arms it (glitchT_/stutPeriod_/crushAmt_ are audio-thread state).
+  if (a == 4 && lastActEdge_ != 4) { Ev g{}; g.kind = EV_GLITCH; g.islot = 0; g.a = 0.09f; g.b = 0.12f; push(g); }
   lastActEdge_ = a;
-  if (cutHold_ > 0.f) { cutHold_ -= dt; cCut_.store(0.12f, std::memory_order_relaxed); cFreeze_.store(1.f, std::memory_order_relaxed); }   // PRESENCE FLOOR: the cut is a dramatic DROP to ~12% (frozen-reverb hush), NOT dead air
-  else { cCut_.store(1.f, std::memory_order_relaxed); cFreeze_.store(0.f, std::memory_order_relaxed); }
+  cCut_.store(1.f, std::memory_order_relaxed); cFreeze_.store(0.f, std::memory_order_relaxed);   // cut REMOVED: master never drops, reverb never freezes (the cliff reverse-slam never arms)
   // sample CHOIR density/amp per act (the washed background)
   static const float CHOIR_LAM[6] = {0.f, 2.0f, 3.0f, 1.0f, 0.f, 4.0f};
   static const float CHOIR_AMP[6] = {0.f, 0.8f, 1.0f, 0.4f, 0.f, 1.0f};
@@ -1102,7 +1104,7 @@ void AudioEngine::render(al::AudioIOData& io) {
       if (v.layer == 4) {                                  // whisper: lead (gated), and into the delay
         float pp = 0.5f * (v.pan + drift + 1.f); pp = pp < 0 ? 0 : (pp > 1 ? 1 : pp);
         float cL = std::cos(pp * 1.5707963f), cR = std::sin(pp * 1.5707963f);
-        leadL += gate_[G_WHISPER] * 1.0f * s * cL; leadR += gate_[G_WHISPER] * 1.0f * s * cR;            // voices a bit louder (0.85 -> 1.0, ~+1.4 dB)
+        leadL += gate_[G_WHISPER] * 1.5f * s * cL; leadR += gate_[G_WHISPER] * 1.5f * s * cR;            // voices pushed to the FOREGROUND (0.85 -> 1.0 -> 1.5, ~+5 dB over original)
         ppSendL += gate_[G_WHISPER] * 0.12f * s * cL; ppSendR += gate_[G_WHISPER] * 0.12f * s * cR; revSend += s * gate_[G_WHISPER] * 0.7f;   // blend more with the global verb
         sampSend += s * gate_[G_WHISPER] * 0.6f;                                                     // short MONO reverb on the whisper
       } else if (v.layer == 9) { leadL += 1.05f * s; leadR += 1.05f * s; ppSendL += 0.4f * s; ppSendR += 0.4f * s; }   // "and" tick: dry + into the ping-pong delay
