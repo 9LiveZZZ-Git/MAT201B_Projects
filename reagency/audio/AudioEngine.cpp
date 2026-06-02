@@ -887,7 +887,7 @@ void AudioEngine::render(al::AudioIOData& io) {
   if (std::fabs(decay - lastDecay_) > 1e-3f) { reverb_.decay(decay); lastDecay_ = decay; }
   if (std::fabs(damp - lastDamp_) > 1e-3f) { reverb_.damping(damp); lastDamp_ = damp; }
 
-  const float isr = 1.f / float(sr_), master = 0.28f;
+  const float isr = 1.f / float(sr_), master = 0.28f, outTrim = 0.316f;   // outTrim = -10 dB output trim (AlloSphere console gain broken / piece too loud); applied POST-tanh so it's a true -10 dB
   const float aLo = 1.f - std::exp(-kTAU * 300.f / float(sr_)), aHi = 1.f - std::exp(-kTAU * 3000.f / float(sr_));
   const float slot = slotRate(depth, hes, act);
   // dubstep growl wobble rate VARIES a lot: re-pick a musical multiple of the beat every ~0.5-2 s,
@@ -1198,7 +1198,7 @@ void AudioEngine::render(al::AudioIOData& io) {
       // so the master polish/glitch axis survives the dome path (L,R already have microGate applied):
       stemFx_[f]   = ((L - Lclean * microGate_) + (R - Rclean * microGate_)) * 0.5f * master;
     } else {
-      io.out(0, f) = std::tanh(L * master); if (nch > 1) io.out(1, f) = std::tanh(R * master);
+      io.out(0, f) = std::tanh(L * master) * outTrim; if (nch > 1) io.out(1, f) = std::tanh(R * master) * outTrim;
       for (int c = 2; c < nch; ++c) io.out(c, f) = 0.f;          // legacy stereo (Mac dev) — UNCHANGED
     }
   }
@@ -1238,7 +1238,7 @@ void AudioEngine::render(al::AudioIOData& io) {
       }
     }
 #endif
-    for (int c = 0; c < nch; ++c) for (int ff = 0; ff < nf; ++ff) io.out(c, ff) = std::tanh(io.out(c, ff));
+    for (int c = 0; c < nch; ++c) for (int ff = 0; ff < nf; ++ff) io.out(c, ff) = std::tanh(io.out(c, ff)) * outTrim;
     // LFE: low-pass the mono bass (~100 Hz) and sum it into the dedicated SUB on device ch 47 (NOT spatialized).
     // ch47 is absent from the layout, was zeroed above + never touched by the panner -> a direct write is correct.
     const float aSub = 1.f - std::exp(-kTAU * 100.f / float(sr_));
@@ -1246,7 +1246,7 @@ void AudioEngine::render(al::AudioIOData& io) {
     if (kSubCh < nch) {                       // dome only (nch>=60); Mac/forced nch<48 skips this
       for (int ff = 0; ff < nf; ++ff) {
         subLfeLp_ = dn(subLfeLp_ + aSub * (stemLow_[ff] - subLfeLp_));
-        io.out(kSubCh, ff) = std::tanh(subLfeLp_);
+        io.out(kSubCh, ff) = std::tanh(subLfeLp_) * outTrim;
       }
     }
   }
