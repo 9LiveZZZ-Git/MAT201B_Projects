@@ -56,3 +56,22 @@ aren't in the picture.**
 
 *World of Shadow Work asks you to love the machine's beautiful surface — and then to feel the
 weight of everyone underneath it who never got to.*
+
+---
+
+## Wall card (one paragraph)
+
+**World of Shadow Work** — Step inside a galaxy the machine dreamed: thousands of images an AI has
+sorted into a glowing cloud, wrapped in a score that grows from the same data. It's gorgeous on
+purpose. Over about fourteen minutes it seduces you, then turns — because the beauty rests on
+**hidden human labor**, the uncredited workers who labeled the data that trains the magic. Their
+names surface and stay. The piece asks one quiet question: you loved it — *did you look for them?*
+
+## Docent script (~30 seconds, spoken)
+
+> "Welcome. You're stepping inside a galaxy of images an AI sorted — it surrounds you, it's
+> beautiful, and the sound is made live, so it's never the same twice. It runs about fourteen
+> minutes and loops, so come in anytime. One thing to know: all that beauty rests on **hidden
+> human labor** — the real workers who labeled the data behind it. Watch for their names; they
+> appear and don't fade. And near the end it goes quiet and turns toward you — if you stop and
+> really look, that's the moment. Enjoy."
