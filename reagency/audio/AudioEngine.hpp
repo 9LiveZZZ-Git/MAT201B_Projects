@@ -312,6 +312,8 @@ class AudioEngine {
   al::Speakers speakers_;
   static constexpr int SPATFR = 4096;        // fixed scratch upper bound (>= framesPerBuffer); no RT alloc
   float stemLead_[SPATFR]{}, stemBed_[SPATFR]{}, stemLow_[SPATFR]{}, stemRev_[SPATFR]{}, stemFx_[SPATFR]{};
+  bool  spatPrepared_ = false;   // al::Lbap allocs in prepare() -> call it ONCE (not per-buffer, RT)
+  float subLfeLp_      = 0.f;     // ~100 Hz one-pole state for the dome SUB (device ch 47)
 #if defined(WOSW_HAVE_DECORR)
   std::unique_ptr<al::Decorrelation> decorr_;   // Stage 2: diffuse the BED across all speakers (envelopment)
   int decorrN_ = 0;                              // decorrelation output count (= speaker count)

@@ -1,5 +1,6 @@
 #include "audio/AudioEngine.hpp"
-#include "al/sound/al_Ambisonics.hpp"               // al::AmbisonicsSpatializer (dome)
+#include "al/sound/al_Ambisonics.hpp"               // (legacy; AmbisonicsSpatializer no longer used)
+#include "al/sound/al_Lbap.hpp"                      // al::Lbap — ring-aware dome panner (replaces Ambisonics)
 #include "al/sound/al_StereoPanner.hpp"             // al::StereoPanner (forced-spatial dev path)
 #include "al/sphere/al_AlloSphereSpeakerLayout.hpp"  // al::AlloSphereSpeakerLayoutCompensated()
 
@@ -797,11 +798,12 @@ void AudioEngine::initSpatial(bool dome, int blockSize) {
   bool force = false;
   if (const char* e = std::getenv("WSW_FORCE_SPAT")) force = (e[0] && e[0] != '0');
   if (!dome && !force) { spat_.reset(); return; }   // Mac dev: leave spat_ NULL -> legacy stereo (unchanged)
+  spatPrepared_ = false;                            // fresh spatializer -> prepare() on the next render
   if (dome) {
-    speakers_ = al::AlloSphereSpeakerLayoutCompensated();              // 54 dome speakers (3 rings)
-    std::unique_ptr<al::AmbisonicsSpatializer> a(
-        new al::AmbisonicsSpatializer(speakers_, 3, 3, 1));            // periphonic: dim 3, order 3 -> 16 ch
-    a->compile();
+    speakers_ = al::AlloSphereSpeakerLayoutCompensated();   // matches the real rig exactly: ch 0-11/16-45/48-59,
+                                                            // group 0/1/2 per ring, gain-compensated; sub ch47 NOT in the set
+    std::unique_ptr<al::Lbap> a(new al::Lbap(speakers_));   // ring-aware VBAP = the dome's intended panner
+    a->compile();                                           // (stock Ambisonics' sampling decoder smears on this irregular 3-ring rig = "a mess")
     spat_ = std::move(a);
   } else {
     speakers_ = al::StereoSpeakerLayout();                            // forced spatial test path on the Mac
@@ -1195,26 +1197,31 @@ void AudioEngine::render(al::AudioIOData& io) {
     }
   }
   if (spat_) {
-    // encode the 5 stems at their 3D positions, decode to the speaker array, soft-clip per channel.
+    if (!spatPrepared_) { spat_->prepare(io); spatPrepared_ = true; }   // Lbap allocs scratch -> prepare ONCE (RT-safe)
     for (int c = 0; c < nch; ++c) for (int ff = 0; ff < nf; ++ff) io.out(c, ff) = 0.f;
-    spat_->prepare(io);
-    const al::Vec3f pLead(cLeadX_.load(std::memory_order_relaxed), cLeadY_.load(std::memory_order_relaxed), cLeadZ_.load(std::memory_order_relaxed));
-    const al::Vec3f pBed (cBedX_.load(std::memory_order_relaxed),  cBedY_.load(std::memory_order_relaxed),  cBedZ_.load(std::memory_order_relaxed));
-    const al::Vec3f pLow(0.f, -2.f, 0.f), pRev(0.f, 3.f, 0.f), pFx(0.f, 0.f, 0.f);
-    bool bedDecorr = false;
+    // FLAT-PLANE mix: altitude does not localize on the dome, so el=0 (zero the up/y axis — Lbap reads reldir.y
+    // as elevation, al_Lbap.cpp:57). Only the LEAD (THEM voice) is a placed point; bed+reverb+master-FX become a
+    // decorrelated diffuse wash across all rings; the sub (lowMono) goes to the LFE below, never spatialized.
+    const al::Vec3f pLead(cLeadX_.load(std::memory_order_relaxed), 0.f, cLeadZ_.load(std::memory_order_relaxed));
+    bool diffuseDecorr = false;
 #if defined(WOSW_HAVE_DECORR)
-    bedDecorr = (decorr_ != nullptr);   // Stage 2 active -> bed is decorrelated (below), not a point source
+    diffuseDecorr = (decorr_ != nullptr);
 #endif
-    spat_->renderBuffer(io, pLead, stemLead_, unsigned(nf));
-    if (!bedDecorr) spat_->renderBuffer(io, pBed, stemBed_, unsigned(nf));   // bed as a point if not decorrelating
-    spat_->renderBuffer(io, pLow,  stemLow_,  unsigned(nf));
-    spat_->renderBuffer(io, pRev,  stemRev_,  unsigned(nf));
-    spat_->renderBuffer(io, pFx,   stemFx_,   unsigned(nf));
+    spat_->renderBuffer(io, pLead, stemLead_, unsigned(nf));   // localized THEM voice (flat azimuth toward its node)
+    if (!diffuseDecorr) {
+      // No-FFTW fallback (decorr absent): place the diffuse stems as flat front points too (degraded).
+      const al::Vec3f pBed(cBedX_.load(std::memory_order_relaxed), 0.f, cBedZ_.load(std::memory_order_relaxed));
+      const al::Vec3f pRev(0.3f, 0.f, -1.f), pFx(-0.3f, 0.f, -1.f);
+      spat_->renderBuffer(io, pBed, stemBed_, unsigned(nf));
+      spat_->renderBuffer(io, pRev, stemRev_, unsigned(nf));
+      spat_->renderBuffer(io, pFx,  stemFx_,  unsigned(nf));
+    }
     spat_->finalize(io);
 #if defined(WOSW_HAVE_DECORR)
-    // Stage 2: spread the BED across the speaker array as a decorrelated diffuse field (RT-safe).
+    // Diffuse wash: bed + reverb + master-FX -> 1->N decorrelation across ALL mains (envelopment, planar).
     if (decorr_ && decorrN_ > 0) {
-      std::memcpy(decorr_->getInputBuffer(0), stemBed_, size_t(nf) * sizeof(float));
+      float* din = decorr_->getInputBuffer(0);
+      for (int ff = 0; ff < nf; ++ff) din[ff] = stemBed_[ff] + stemRev_[ff] + stemFx_[ff];
       decorr_->processBuffer();
       for (int i = 0; i < decorrN_ && i < int(speakers_.size()); ++i) {
         const int ch = int(speakers_[i].deviceChannel);
@@ -1226,6 +1233,16 @@ void AudioEngine::render(al::AudioIOData& io) {
     }
 #endif
     for (int c = 0; c < nch; ++c) for (int ff = 0; ff < nf; ++ff) io.out(c, ff) = std::tanh(io.out(c, ff));
+    // LFE: low-pass the mono bass (~100 Hz) and sum it into the dedicated SUB on device ch 47 (NOT spatialized).
+    // ch47 is absent from the layout, was zeroed above + never touched by the panner -> a direct write is correct.
+    const float aSub = 1.f - std::exp(-kTAU * 100.f / float(sr_));
+    const int   kSubCh = 47;
+    if (kSubCh < nch) {                       // dome only (nch>=60); Mac/forced nch<48 skips this
+      for (int ff = 0; ff < nf; ++ff) {
+        subLfeLp_ = dn(subLfeLp_ + aSub * (stemLow_[ff] - subLfeLp_));
+        io.out(kSubCh, ff) = std::tanh(subLfeLp_);
+      }
+    }
   }
   lastDepth_ = depth;
 }
