@@ -13,6 +13,12 @@
 // pending-event scheduler; no alloc/lock in the callback.
 #include "al/io/al_AudioIOData.hpp"
 #include "al/sound/al_Reverb.hpp"
+#include "al/sound/al_Spatializer.hpp"   // al::Spatializer base — dome placement (Stage 1)
+#include "al/sound/al_Speaker.hpp"       // al::Speakers layout
+#include <memory>
+#if defined(WOSW_HAVE_DECORR)
+#include "al_ext/spatialaudio/al_Decorrelation.hpp"   // al::Decorrelation — diffuse bed across the dome (Stage 2)
+#endif
 
 #include <array>
 #include <atomic>
@@ -46,6 +52,18 @@ class AudioEngine {
               float emergePhase = 0.f, bool emergeActive = false);
 
   void render(al::AudioIOData& io);
+
+  // ---- dome spatialization (Stage 1: Ambisonics placement) ----
+  // Build the spatializer ONCE off the audio thread (call from onCreate). dome=false leaves the
+  // spatializer NULL => the legacy stereo path runs UNCHANGED (Mac dev). Env WSW_FORCE_SPAT=1
+  // forces a StereoPanner spatial path on for local testing.
+  void initSpatial(bool dome, int blockSize);
+  // Sim-thread: push listener-relative source directions (lead = THEM focus node, bed = front).
+  void setSpatialDirs(float lx, float ly, float lz, float bx, float by, float bz) {
+    cLeadX_.store(lx, std::memory_order_relaxed); cLeadY_.store(ly, std::memory_order_relaxed);
+    cLeadZ_.store(lz, std::memory_order_relaxed); cBedX_.store(bx, std::memory_order_relaxed);
+    cBedY_.store(by, std::memory_order_relaxed);  cBedZ_.store(bz, std::memory_order_relaxed);
+  }
 
  private:
   // ---------- scale ----------
@@ -286,6 +304,18 @@ class AudioEngine {
   float panLFO_ = 0.f;
   float lastDepth_ = 1.f, moodLP_ = 1.f, tension_ = 0.f, padBloom_ = 1.f, reverbWet_ = 0.3f;
   float masterLoL_ = 0.f, masterLoR_ = 0.f, masterHiL_ = 0.f, masterHiR_ = 0.f;
+
+  // ---- dome spatialization state (Stage 1) ----
+  std::atomic<float> cLeadX_{0.f}, cLeadY_{0.f}, cLeadZ_{-4.f};   // THEM focus point (listener-relative dir)
+  std::atomic<float> cBedX_{0.f},  cBedY_{0.f},  cBedZ_{-3.f};    // bed anchor (in front of the listener)
+  std::unique_ptr<al::Spatializer> spat_;   // Ambisonics (dome) / StereoPanner (forced); NULL => legacy stereo
+  al::Speakers speakers_;
+  static constexpr int SPATFR = 4096;        // fixed scratch upper bound (>= framesPerBuffer); no RT alloc
+  float stemLead_[SPATFR]{}, stemBed_[SPATFR]{}, stemLow_[SPATFR]{}, stemRev_[SPATFR]{}, stemFx_[SPATFR]{};
+#if defined(WOSW_HAVE_DECORR)
+  std::unique_ptr<al::Decorrelation> decorr_;   // Stage 2: diffuse the BED across all speakers (envelopment)
+  int decorrN_ = 0;                              // decorrelation output count (= speaker count)
+#endif
 
   al::Reverb<float> reverb_;
   al::Reverb<float> sampRev_;       // short mono reverb to blend the CC0 samples

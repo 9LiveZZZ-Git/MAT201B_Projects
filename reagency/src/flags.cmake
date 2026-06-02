@@ -44,6 +44,14 @@ if(NOT TARGET reagency_support)
     set_target_properties(reagency_support PROPERTIES
         CXX_STANDARD 14 CXX_STANDARD_REQUIRED ON)
     target_link_libraries(reagency_support PUBLIC al)
+    # Stage 2 (decorrelated bed): al_ext/spatialaudio builds as `al_spatialaudio` ONLY when FFTW is
+    # found (Linux/Darwin). When present, give AudioEngine.cpp the al_ext include path + WOSW_HAVE_DECORR
+    # so it pulls al::Decorrelation; the lib itself reaches the app via the playground's ${AL_EXT_LIBRARIES}.
+    # Absent FFTW -> macro undefined everywhere -> the decorr code compiles out (no link error).
+    if(TARGET al_spatialaudio)
+        target_compile_definitions(reagency_support PRIVATE WOSW_HAVE_DECORR)
+        target_include_directories(reagency_support PRIVATE "${al_path}/..")   # for "al_ext/spatialaudio/..."
+    endif()
 endif()
 
 set(app_link_libs reagency_support)
@@ -55,4 +63,11 @@ set(app_compile_flags -std=c++14)   # AlloSphere toolchain has no C++17; build t
 # our include-guard macro so main_reagency.cpp pulls the cuttlebone header. Windows stays OSC-only.
 if(CMAKE_SYSTEM_NAME MATCHES "Linux" OR CMAKE_SYSTEM_NAME MATCHES "Darwin")
   set(app_definitions ${app_definitions} WOSW_HAVE_CUTTLEBONE)
+endif()
+
+# Stage 2: define WOSW_HAVE_DECORR for the APP TU too (main_reagency.cpp includes AudioEngine.hpp),
+# so the app + reagency_support see an IDENTICAL AudioEngine layout (decorr members are #if-guarded) —
+# otherwise an ODR mismatch. Only when al_spatialaudio actually built (FFTW present).
+if(TARGET al_spatialaudio)
+  set(app_definitions ${app_definitions} WOSW_HAVE_DECORR)
 endif()

@@ -1,4 +1,7 @@
 #include "audio/AudioEngine.hpp"
+#include "al/sound/al_Ambisonics.hpp"               // al::AmbisonicsSpatializer (dome)
+#include "al/sound/al_StereoPanner.hpp"             // al::StereoPanner (forced-spatial dev path)
+#include "al/sphere/al_AlloSphereSpeakerLayout.hpp"  // al::AlloSphereSpeakerLayoutCompensated()
 
 #include <algorithm>
 #include <cctype>
@@ -790,6 +793,42 @@ void AudioEngine::fireLoop(int L) {   // Eno loop L fires a note on its layer, r
   e.amp = LOOPAMP[L]; e.pan = 0.7f * (2.f * float(L) / float(NLOOP - 1) - 1.f); schedule(e);
 }
 
+void AudioEngine::initSpatial(bool dome, int blockSize) {
+  bool force = false;
+  if (const char* e = std::getenv("WSW_FORCE_SPAT")) force = (e[0] && e[0] != '0');
+  if (!dome && !force) { spat_.reset(); return; }   // Mac dev: leave spat_ NULL -> legacy stereo (unchanged)
+  if (dome) {
+    speakers_ = al::AlloSphereSpeakerLayoutCompensated();              // 54 dome speakers (3 rings)
+    std::unique_ptr<al::AmbisonicsSpatializer> a(
+        new al::AmbisonicsSpatializer(speakers_, 3, 3, 1));            // periphonic: dim 3, order 3 -> 16 ch
+    a->compile();
+    spat_ = std::move(a);
+  } else {
+    speakers_ = al::StereoSpeakerLayout();                            // forced spatial test path on the Mac
+    std::unique_ptr<al::StereoPanner> s(new al::StereoPanner(speakers_));
+    s->compile();
+    spat_ = std::move(s);
+  }
+  spat_->numFrames(unsigned(SPATFR));
+#if defined(WOSW_HAVE_DECORR)
+  // Stage 2: build a 1->N decorrelation (Kendall random-phase all-pass FIRs via the zita Convolver)
+  // that spreads the BED mono across ALL speakers, so the pad/ambience ENVELOPS the dome instead of
+  // sitting at one point. configure() allocates (FFT plans + IRs) -> done HERE, off the audio thread.
+  // processBuffer() in render() is RT-safe (partitioned convolution, no alloc).
+  if (blockSize >= 64 && !speakers_.empty()) {
+    decorrN_ = int(speakers_.size());
+    std::map<uint32_t, std::vector<uint32_t>> routing;
+    std::vector<uint32_t> outs; outs.reserve(size_t(decorrN_));
+    for (int i = 0; i < decorrN_; ++i) outs.push_back(uint32_t(i));
+    routing[0] = outs;                                  // 1 bed input -> N decorrelated speaker feeds
+    decorr_.reset(new al::Decorrelation(1024));
+    decorr_->configure(uint32_t(blockSize), routing, /*inputsAreBusses=*/false);
+  }
+#else
+  (void)blockSize;
+#endif
+}
+
 void AudioEngine::render(al::AudioIOData& io) {
   const int nf = int(io.framesPerBuffer()), nch = int(io.channelsOut());
   if (!ready()) { for (int c = 0; c < nch; ++c) for (int f = 0; f < nf; ++f) io.out(c, f) = 0.f; return; }
@@ -1095,6 +1134,7 @@ void AudioEngine::render(al::AudioIOData& io) {
     float L = busyGain * cut_ * (bedL + leadL + lowMono + reverbWet_ * w1);   // cut_ = IV structural silence (NO voice duck)
     float R = busyGain * cut_ * (bedR + leadR + lowMono + reverbWet_ * w2);
     if (!std::isfinite(L)) L = 0.f; if (!std::isfinite(R)) R = 0.f;        // SAFETY: keep the master feedback + output finite (no persistent mute)
+    const float Lclean = L, Rclean = R;   // pre EQ/glitch clean stem-sum (drives the diffuse master-FX source on the dome)
     masterLoL_ = dn(masterLoL_ + aLo * (L - masterLoL_)); L += 2.16f * masterLoL_;
     masterLoR_ = dn(masterLoR_ + aLo * (R - masterLoR_)); R += 2.16f * masterLoR_;
     masterHiL_ = dn(masterHiL_ + aHi * (L - masterHiL_)); L += 0.45f * (masterHiL_ - L);   // pink HF tilt
@@ -1137,8 +1177,55 @@ void AudioEngine::render(al::AudioIOData& io) {
     }
     microGate_ += (microGateTgt_ - microGate_) * (microGateTgt_ < microGate_ ? gAtk : gRel);   // attack faster than release (no pop)
     L *= microGate_; R *= microGate_;                               // islot 5: master micro-gate
-    io.out(0, f) = std::tanh(L * master); if (nch > 1) io.out(1, f) = std::tanh(R * master);
-    for (int c = 2; c < nch; ++c) io.out(c, f) = 0.f;
+    if (spat_) {
+      // DOME path: capture 4 placed stems + 1 diffuse master-FX stem into fixed scratch (no alloc).
+      // gc carries the same structural scalars the stereo path applies (busyGain*cut_*microGate*master),
+      // so the placed stems + the FX delta sum back to EXACTLY the stereo master energy (no double-count).
+      const float gc = busyGain * cut_ * microGate_ * master;
+      stemLead_[f] = gc * (leadL + leadR) * 0.5f;                 // THEM voice -> placed at the focus node
+      stemBed_[f]  = gc * (bedL  + bedR ) * 0.5f;                 // pad/melodic bed -> wide front (Stage 2 decorrelates)
+      stemLow_[f]  = gc *  lowMono;                               // sub/kick -> centered floor (does not localize)
+      stemRev_[f]  = gc *  reverbWet_ * (w1 + w2) * 0.5f;         // reverb wash -> diffuse overhead
+      // master EQ-tilt + glitch contribution (post-chain delta vs the gated clean sum), diffuse,
+      // so the master polish/glitch axis survives the dome path (L,R already have microGate applied):
+      stemFx_[f]   = ((L - Lclean * microGate_) + (R - Rclean * microGate_)) * 0.5f * master;
+    } else {
+      io.out(0, f) = std::tanh(L * master); if (nch > 1) io.out(1, f) = std::tanh(R * master);
+      for (int c = 2; c < nch; ++c) io.out(c, f) = 0.f;          // legacy stereo (Mac dev) — UNCHANGED
+    }
+  }
+  if (spat_) {
+    // encode the 5 stems at their 3D positions, decode to the speaker array, soft-clip per channel.
+    for (int c = 0; c < nch; ++c) for (int ff = 0; ff < nf; ++ff) io.out(c, ff) = 0.f;
+    spat_->prepare(io);
+    const al::Vec3f pLead(cLeadX_.load(std::memory_order_relaxed), cLeadY_.load(std::memory_order_relaxed), cLeadZ_.load(std::memory_order_relaxed));
+    const al::Vec3f pBed (cBedX_.load(std::memory_order_relaxed),  cBedY_.load(std::memory_order_relaxed),  cBedZ_.load(std::memory_order_relaxed));
+    const al::Vec3f pLow(0.f, -2.f, 0.f), pRev(0.f, 3.f, 0.f), pFx(0.f, 0.f, 0.f);
+    bool bedDecorr = false;
+#if defined(WOSW_HAVE_DECORR)
+    bedDecorr = (decorr_ != nullptr);   // Stage 2 active -> bed is decorrelated (below), not a point source
+#endif
+    spat_->renderBuffer(io, pLead, stemLead_, unsigned(nf));
+    if (!bedDecorr) spat_->renderBuffer(io, pBed, stemBed_, unsigned(nf));   // bed as a point if not decorrelating
+    spat_->renderBuffer(io, pLow,  stemLow_,  unsigned(nf));
+    spat_->renderBuffer(io, pRev,  stemRev_,  unsigned(nf));
+    spat_->renderBuffer(io, pFx,   stemFx_,   unsigned(nf));
+    spat_->finalize(io);
+#if defined(WOSW_HAVE_DECORR)
+    // Stage 2: spread the BED across the speaker array as a decorrelated diffuse field (RT-safe).
+    if (decorr_ && decorrN_ > 0) {
+      std::memcpy(decorr_->getInputBuffer(0), stemBed_, size_t(nf) * sizeof(float));
+      decorr_->processBuffer();
+      for (int i = 0; i < decorrN_ && i < int(speakers_.size()); ++i) {
+        const int ch = int(speakers_[i].deviceChannel);
+        if (ch < 0 || ch >= nch) continue;
+        const float* ob = decorr_->getOutputBuffer(unsigned(i));
+        if (!ob) continue;
+        for (int ff = 0; ff < nf; ++ff) io.out(ch, ff) += ob[ff];
+      }
+    }
+#endif
+    for (int c = 0; c < nch; ++c) for (int ff = 0; ff < nf; ++ff) io.out(c, ff) = std::tanh(io.out(c, ff));
   }
   lastDepth_ = depth;
 }

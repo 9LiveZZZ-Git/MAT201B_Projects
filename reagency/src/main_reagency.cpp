@@ -43,6 +43,7 @@
 #endif  // WOSW_HAVE_CUTTLEBONE
 #include "al/math/al_Quat.hpp"
 #include "al/math/al_Vec.hpp"
+#include "al/sphere/al_SphereUtils.hpp"   // al::sphere::isSphereMachine() — dome vs Mac audio/spatial selection
 
 #include "core/WoSWState.hpp"
 #include "core/Conductor.hpp"
@@ -204,6 +205,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     int clusterCounts[3] = {0, 0, 0};
     for (int i = 0; i < field.count(); ++i) { int c = field.clusterOf(i); if (c >= 0 && c < 3) ++clusterCounts[c]; }
     audio_.init(assetDir, audioIO().framesPerSecond(), clusterCounts, 3);   // primary-only; scale from manifest.json
+    if (isPrimary()) audio_.initSpatial(al::sphere::isSphereMachine(), int(audioIO().framesPerBuffer()));   // dome -> Ambisonics + decorrelated bed; Mac -> stereo (spat_ NULL)
     for (int i = 0; i < field.count(); ++i) {          // traceable corpus photos + dream nodes
       if (field.typeOf(i) == 0 && field.atlasOf(i) >= 0) heroNodes_.push_back(i);
       if (field.typeOf(i) == 2) dreamNodes_.push_back(i);
@@ -225,6 +227,14 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     Vec3d r = nav().quat().rotate(Vec3d(1, 0, 0));
     double p = d.dot(r);
     return float(p < -1 ? -1 : (p > 1 ? 1 : p));
+  }
+
+  // Listener-relative, listener-rotated world point for the manual dome Spatializer (which does NOT
+  // auto-rotate by a listener pose). Same projection family as panOf(); sim-thread only.
+  Vec3f relOf(const Vec3f& w) {
+    Vec3d d = Vec3d(w.x, w.y, w.z) - nav().pos();
+    Vec3d r = nav().quat().conj().rotate(d);   // world -> listener-local frame
+    return Vec3f(float(r.x), float(r.y), float(r.z));
   }
 
   // v2 T8: promote a THEM worker credit into the persistent ring (called on image-dissolve in
@@ -428,6 +438,10 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
       audio_.update(float(dt), s.hesitation, s.depth, conductor.progress(),
                     panOf(Vec3f(s.focusPos[0], s.focusPos[1], s.focusPos[2])), act,
                     s.emergePhase, s.emergeDream >= 0);   // 2c: feed the SYNCED dream-emergence (sim thread, primary)
+      // Stage-1 dome spatialization: THEM lead -> the conductor's current fixation (its galaxy node);
+      // bed -> just in front of the listener. Projected to the listener frame here (audio thread sees only dirs).
+      { Vec3f lead = relOf(Vec3f(s.focusPos[0], s.focusPos[1], s.focusPos[2]));
+        audio_.setSpatialDirs(lead.x, lead.y, lead.z, 0.f, 0.f, -3.f); }
     } else {
       // apply the primary's exact pose (Quatd is w,x,y,z)
       nav().pos().set(s.navPos[0], s.navPos[1], s.navPos[2]);
@@ -650,7 +664,8 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
 int main(int argc, char** argv) {
   auto app = std::make_unique<WoSW>();
   if (argc > 1) app->assetDir = argv[1];     // run_demo.sh passes an absolute assets path
-  app->configureAudio(44100, 512, 2, 0);
+  const bool wsw_dome = al::sphere::isSphereMachine();
+  app->configureAudio(44100, 512, wsw_dome ? 60 : 2, 0);   // 60 dome speaker channels on the AlloSphere; stereo on the Mac
   app->title("World of Shadow Work");
   app->start(/*packetSize=*/4096);           // WoSWState is tiny
   return 0;
