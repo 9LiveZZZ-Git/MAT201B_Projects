@@ -314,6 +314,8 @@ class AudioEngine {
   float stemLead_[SPATFR]{}, stemBed_[SPATFR]{}, stemLow_[SPATFR]{}, stemRev_[SPATFR]{}, stemFx_[SPATFR]{};
   bool  spatPrepared_ = false;   // al::Lbap allocs in prepare() -> call it ONCE (not per-buffer, RT)
   float subLfeLp_      = 0.f;     // ~100 Hz one-pole state for the dome SUB (device ch 47)
+  float washGain_      = 2.0f;    // dome: boost the decorrelated mains wash (the music) -- env WSW_WASH_GAIN
+  float subTrim_       = 0.4f;    // dome: trim the LFE/sub level (it was dominating the mains) -- env WSW_SUB_TRIM
 #if defined(WOSW_HAVE_DECORR)
   std::unique_ptr<al::Decorrelation> decorr_;   // Stage 2: diffuse the BED across all speakers (envelopment)
   int decorrN_ = 0;                              // decorrelation output count (= speaker count)

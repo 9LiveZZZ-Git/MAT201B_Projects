@@ -805,6 +805,10 @@ void AudioEngine::initSpatial(bool dome, int blockSize) {
   if (const char* e = std::getenv("WSW_FORCE_SPAT")) force = (e[0] && e[0] != '0');
   if (!dome && !force) { spat_.reset(); return; }   // Mac dev: leave spat_ NULL -> legacy stereo (unchanged)
   spatPrepared_ = false;                            // fresh spatializer -> prepare() on the next render
+  // Dome mains/sub balance knobs — tunable on-site WITHOUT recompiling (the dome console is the only
+  // place to judge them). WSW_WASH_GAIN boosts the mains music wash; WSW_SUB_TRIM cuts the LFE.
+  if (const char* e = std::getenv("WSW_WASH_GAIN")) { float v = float(std::atof(e)); if (v > 0.f)  washGain_ = v; }
+  if (const char* e = std::getenv("WSW_SUB_TRIM"))  { float v = float(std::atof(e)); if (v >= 0.f) subTrim_  = v; }
   if (dome) {
     speakers_ = al::AlloSphereSpeakerLayoutCompensated();   // matches the real rig exactly: ch 0-11/16-45/48-59,
                                                             // group 0/1/2 per ring, gain-compensated; sub ch47 NOT in the set
@@ -1236,7 +1240,7 @@ void AudioEngine::render(al::AudioIOData& io) {
         if (ch < 0 || ch >= nch) continue;
         const float* ob = decorr_->getOutputBuffer(unsigned(i));
         if (!ob) continue;
-        for (int ff = 0; ff < nf; ++ff) io.out(ch, ff) += ob[ff];
+        for (int ff = 0; ff < nf; ++ff) io.out(ch, ff) += ob[ff] * washGain_;   // boost the diffuse mains wash (music)
       }
     }
 #endif
@@ -1248,7 +1252,7 @@ void AudioEngine::render(al::AudioIOData& io) {
     if (kSubCh < nch) {                       // dome only (nch>=60); Mac/forced nch<48 skips this
       for (int ff = 0; ff < nf; ++ff) {
         subLfeLp_ = dn(subLfeLp_ + aSub * (stemLow_[ff] - subLfeLp_));
-        io.out(kSubCh, ff) = std::tanh(subLfeLp_) * outTrim;
+        io.out(kSubCh, ff) = std::tanh(subLfeLp_) * outTrim * subTrim_;   // trim the LFE (it dominated the mains on the dome)
       }
     }
   }
