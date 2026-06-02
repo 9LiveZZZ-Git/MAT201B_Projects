@@ -62,7 +62,7 @@ struct ParticleField {
   float point_size_    = 19.f;   // sprite quad size (enlarged only to hold the glow halo)
   float core_sigma_    = 0.22f;  // bright CORE — kept at the original ~size-7 apparent radius
   float halo_sigma_    = 0.55f;  // soft glow radius
-  float halo_strength_ = 0.50f;  // glow intensity relative to the core
+  float halo_strength_ = 0.35f;  // glow intensity relative to the core (galaxy bloom dialed back from 0.50)
   float intensity_     = 1.70f;  // overall brightness (AlloSphere projector washout headroom)
 
   bool loadPoints(const std::string& path);

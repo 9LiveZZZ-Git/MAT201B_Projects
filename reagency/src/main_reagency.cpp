@@ -467,7 +467,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     const float vesAlpha  = 0.70f + 0.30f * vd;   // solid crisp points (no-bloom alpha cloud, not additive glow)
     const float vesScale  = 4.0f + 1.0f * vd;     // BIG — fills the main screen (camera sits ~7 ahead, outside it)
 
-    g.clear(0.03f, 0.03f, 0.05f);     // subtly-lifted void (reads better in the dome)
+    g.clear(0.09f, 0.10f, 0.14f);     // lifted void — reads as deep space, not dead-black, on the dome projectors (tunable)
     webs.draw(g, webBright);          // similarity webs under the points
     // A: NEURONS FIRING IN THE WEB — the living electrical field over the WHOLE similarity graph,
     // biased denser around s.curNode (the machine's attention). Pure function of synced simTime +
