@@ -59,10 +59,10 @@ struct ParticleField {
   bool              shader_ok_ = false;
 
   // Look / cheap per-sprite "bloom" (no post-process; dome-bright). All one-line tunables.
-  float point_size_    = 19.f;   // sprite quad size (enlarged only to hold the glow halo)
+  float point_size_    = 14.f;   // sprite quad size (19->14: ~45% less fill/sprite -> faster on weak dome projectors; also tones the bloom)
   float core_sigma_    = 0.22f;  // bright CORE — kept at the original ~size-7 apparent radius
   float halo_sigma_    = 0.55f;  // soft glow radius
-  float halo_strength_ = 0.35f;  // glow intensity relative to the core (galaxy bloom dialed back from 0.50)
+  float halo_strength_ = 0.28f;  // glow intensity relative to the core (0.50 -> 0.35 -> 0.28; less overdraw-y bloom)
   float intensity_     = 1.70f;  // overall brightness (AlloSphere projector washout headroom)
 
   bool loadPoints(const std::string& path);
