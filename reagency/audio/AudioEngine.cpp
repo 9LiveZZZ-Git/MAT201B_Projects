@@ -352,7 +352,7 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
     {1.00f, 0.40f, 0.30f, 0.40f, 1.00f, 1.00f, 1.00f, 0.40f}, // I   SEDUCTION: lush bed + the tune
     {1.00f, 1.00f, 0.40f, 0.50f, 1.00f, 0.30f, 0.70f, 0.50f}, // II  READING: the whisper leads
     {0.70f, 0.85f, 1.00f, 1.00f, 1.00f, 0.00f, 0.20f, 1.00f}, // III EXTRACTION: grinding, dense, the cede
-    {0.00f, 1.00f, 1.00f, 1.00f, 0.30f, 0.00f, 0.00f, 0.30f}, // IV  TURN: STRIP to bare pulse (kick+grain+whisper)
+    {0.10f, 1.00f, 1.00f, 1.00f, 0.30f, 0.00f, 0.00f, 0.30f}, // IV  TURN: bare pulse + a FAINT drone underbed (0.10) so it's never dead-silent between pulses
     {0.50f, 0.50f, 0.60f, 0.40f, 0.70f, 0.30f, 0.40f, 0.40f}, // V   INTEGRATION: thinned, haunted (comfort-FAIL)
   };
   static const float ACTM[6][3] = { {0.5f, 0.5f, 0.4f},       // mood: bright, density, wet
@@ -410,7 +410,7 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
   // IV TURN: latch a structural CUT to silence + reverb freeze on the III->IV edge, hold ~0.35 s
   if (a == 4 && lastActEdge_ != 4) cutHold_ = 0.35f;
   lastActEdge_ = a;
-  if (cutHold_ > 0.f) { cutHold_ -= dt; cCut_.store(0.f, std::memory_order_relaxed); cFreeze_.store(1.f, std::memory_order_relaxed); }
+  if (cutHold_ > 0.f) { cutHold_ -= dt; cCut_.store(0.12f, std::memory_order_relaxed); cFreeze_.store(1.f, std::memory_order_relaxed); }   // PRESENCE FLOOR: the cut is a dramatic DROP to ~12% (frozen-reverb hush), NOT dead air
   else { cCut_.store(1.f, std::memory_order_relaxed); cFreeze_.store(0.f, std::memory_order_relaxed); }
   // sample CHOIR density/amp per act (the washed background)
   static const float CHOIR_LAM[6] = {0.f, 2.0f, 3.0f, 1.0f, 0.f, 4.0f};
@@ -728,7 +728,7 @@ void AudioEngine::fireGlitch(float activity, bool whisperOn) {
 
   const float dens = cGlitchDens_.load(std::memory_order_relaxed);
   if (dens <= 0.f) { microGateTgt_ = 1.f; return; }                // axis OFF (Acts I/V) -> let the master gate re-open
-  microGateTgt_ = (frand() < cGateAmt_.load(std::memory_order_relaxed)) ? 0.f : 1.f;   // islot 5: re-roll per LIT GRID HIT (decoupled from the op-density p) -- gate breathes on every hit (AUDIO_LATER_PLAN.md L197/L216)
+  microGateTgt_ = (frand() < cGateAmt_.load(std::memory_order_relaxed)) ? 0.20f : 1.f;   // islot 5: glitch micro-gate DUCKS to a 0.20 floor (not full silence) -> reads as rhythm, never a dropout (AUDIO_LATER_PLAN.md L197/L216)
   float p = dens * (0.4f + 0.6f * activity) * (whisperOn ? 0.5f : 1.f);   // duck under the whisper (edits fall in the gaps)
   if (frand() >= p) return;
 
