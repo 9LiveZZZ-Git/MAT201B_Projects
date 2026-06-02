@@ -1,6 +1,6 @@
 # World of Shadow Work — a guide for guests
 
-*An immersive AlloSphere piece. About 14 minutes, looping. Sound and image are generated live —
+*An immersive AlloSphere piece. About 7½ minutes, looping. Sound and image are generated live —
 no two moments are exactly the same.*
 
 ---
@@ -37,14 +37,14 @@ A living score that grows from the same data you're seeing — a deep drone, shi
 **ghostly voices**: fragments of real workers' testimony. On the dome the sound moves **around
 you** in space, with the bass felt from below. The voices are *THEM*, made audible.
 
-## The arc — five acts (~14-minute cycle, then it loops)
+## The arc — five acts (~7½-minute cycle, then it loops)
 | | Act | ≈ When | What shifts |
 |---|---|---|---|
-| **I** | **Seduction** | **0:00–3:30** | The galaxy is gorgeous and inviting; warm, enveloping sound. You fall for it. |
-| **II** | **Reading** | **3:30–6:00** | The machine starts *labeling* — words stamp onto the images as it classifies what it sees. |
-| **III** | **Extraction** | **6:00–8:30** | The grind. Images are consumed faster, dissolving into grains; the sound hardens — the cost surfaces, and the workers' names begin to appear. |
-| **IV** | **The Turn** | **8:30–10:00** | Everything drops to a bare, hushed pulse. This is the mirror — *you used it; did you look for them?* |
-| **V** | **Residue** | **10:00–14:00** | It brightens again — but only **partway**. It never returns to the Act-I bliss. The workers' names remain, haunting the comfort. Then it loops. |
+| **I** | **Seduction** | **0:00–1:30** | The galaxy is gorgeous and inviting; warm, enveloping sound. You fall for it. |
+| **II** | **Reading** | **1:30–3:00** | The machine starts *labeling* — words stamp onto the images as it classifies what it sees. |
+| **III** | **Extraction** | **3:00–4:30** | The grind. Images are consumed faster, dissolving into grains; the sound hardens — the cost surfaces, and the workers' names begin to appear. |
+| **IV** | **The Turn** | **4:30–6:00** | Everything thins to a bare, hushed pulse (marked by a brief glitch-stutter). This is the mirror — *you used it; did you look for them?* |
+| **V** | **Residue** | **6:00–7:30** | It brightens again — but only **partway**. It never returns to the Act-I bliss. The workers' names remain, haunting the comfort. Then it loops. |
 
 *Times are approximate: the piece runs on a ~14-minute clock that **slows when the machine "hesitates,"** so an act can linger a little past its mark.*
 
@@ -65,15 +65,15 @@ weight of everyone underneath it who never got to.*
 
 **World of Shadow Work** — Step inside a galaxy the machine dreamed: thousands of images an AI has
 sorted into a glowing cloud, wrapped in a score that grows from the same data. It's gorgeous on
-purpose. Over about fourteen minutes it seduces you, then turns — because the beauty rests on
+purpose. Over about seven and a half minutes it seduces you, then turns — because the beauty rests on
 **hidden human labor**, the uncredited workers who labeled the data that trains the magic. Their
 names surface and stay. The piece asks one quiet question: you loved it — *did you look for them?*
 
 ## Docent script (~30 seconds, spoken)
 
 > "Welcome. You're stepping inside a galaxy of images an AI sorted — it surrounds you, it's
-> beautiful, and the sound is made live, so it's never the same twice. It runs about fourteen
-> minutes and loops, so come in anytime. One thing to know: all that beauty rests on **hidden
+> beautiful, and the sound is made live, so it's never the same twice. It runs about seven and a
+> half minutes and loops, so come in anytime. One thing to know: all that beauty rests on **hidden
 > human labor** — the real workers who labeled the data behind it. Watch for their names; they
 > appear and don't fade. And near the end it goes quiet and turns toward you — if you stop and
 > really look, that's the moment. Enjoy."

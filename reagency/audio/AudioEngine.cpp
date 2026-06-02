@@ -37,7 +37,7 @@ static const Tune TUNES[3] = {{TW_S, TW_D, 14}, {OJ_S, OJ_D, 15}, {FJ_S, FJ_D, 1
 // LATER tier — time-authoritative conductor (Step 0). FIBSEC = cumulative section END times (s);
 // the golden-mean structural cut is index 7 = 555 s. FIBACT maps each sub-section -> an advisory act.
 // secT_ walks FIBSEC to derive conductAct_ + a within-section ramp conductF_ (see AudioEngine::conduct).
-static const float FIBSEC[12] = {89.f, 144.f, 233.f, 322.f, 377.f, 466.f, 521.f, 555.f, 576.f, 631.f, 720.f, 843.f};
+static const float FIBSEC[12] = {30.f, 60.f, 90.f, 135.f, 180.f, 225.f, 247.5f, 270.f, 315.f, 360.f, 405.f, 450.f};   // condensed 450s: FIBACT act-change indices land on the visual edges 90/180/270/360 (closes a2)
 static const int   FIBACT[12] = {1, 1, 1, 2, 2, 3, 3, 3, 4, 4, 5, 5};
 
 static inline float dn(float x) { return (std::fabs(x) < 1e-15f) ? 0.f : x; }
@@ -167,7 +167,7 @@ float AudioEngine::jiBassHz() const { return cClusterRoot_.load(std::memory_orde
 // Pure sim-thread bookkeeping: adds NO sound. The shipped 5-act palette still keys off the `act` arg + the
 // existing `f` ramp (AV-sync decision a1); these members are the within-time clock the LATER techniques read.
 void AudioEngine::conduct(float dt) {
-  secT_ += dt;
+  secT_ += dt; if (secT_ >= 450.f) secT_ -= 450.f;   // wrap at CYCLE (condensed) so a future reader of conductAct_/conductF_ stays in-loop
   int s = 0; while (s < 11 && secT_ >= FIBSEC[s]) ++s;        // current FIBSEC sub-section index [0..11]
   conductAct_ = FIBACT[s];                                    // advisory act for this sub-section
   float segStart = (s > 0) ? FIBSEC[s - 1] : 0.f;             // this sub-section's start time
@@ -377,7 +377,7 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
   // 1a within-section BUILD: f ramps 0->1 across the section so sections EVOLVE rather than slam.
   if (a != prevConductAct_) { actElapsed_ = 0.f; prevConductAct_ = a; }
   actElapsed_ += dt;
-  static const float SEGDUR[6] = {200.f, 210.f, 150.f, 150.f, 90.f, 240.f};
+  static const float SEGDUR[6] = {90.f, 90.f, 90.f, 90.f, 90.f, 90.f};   // condensed: every act is 90s, so each within-act build (f=actElapsed_/SEGDUR) completes once per act
   const float f = clamp01(actElapsed_ / SEGDUR[a]);
   static const float SPARS[6] = {0.6f, 0.55f, 0.50f, 0.10f, 0.85f, 0.70f};   // higher -> fewer Eno loops survive
   cSparsity_.store(SPARS[a], std::memory_order_relaxed);
@@ -460,7 +460,7 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
   // Act I + the Act-V recap) so the Shepard-noise->harmonic-pad crossfade also shapes the opening/recap, not only
   // when a dream is attended. Both inputs derive from the same synced clock (emergePhase from WoSWState; a/actElapsed_/f). ----
   { float condEmg = 0.f;
-    if (a == 1) condEmg = clamp01(actElapsed_ / 89.f);                  // the opening ~89 s forms once
+    if (a == 1) condEmg = clamp01(actElapsed_ / 90.f);                  // the opening forms once across the 90s Act I (act-fraction-locked)
     else if (a == 5) condEmg = clamp01(0.30f + 0.70f * f);             // the Act-V recap re-forms
     float attendEmg = emergeActive ? clamp01(emergePhase) : 0.f;       // the attended/approached dream forming
     float emg = std::max(condEmg, attendEmg);                          // whichever forms harder drives the bed

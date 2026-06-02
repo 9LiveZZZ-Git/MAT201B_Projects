@@ -120,7 +120,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   int           heroCursor_ = 0;
   float         traceTimer_ = 0.f;
   static constexpr float TRACE_LIFE  = 9.0f;  // seconds a surfaced photo lives (lingers)
-  static constexpr float CREDIT_LIFE = 300.f; // v2 T8: a THEM credit holds this long, then recycles to the next worker
+  static constexpr float CREDIT_LIFE = 160.f; // v2 T8: a THEM credit holds this long, then recycles (retimed 300->160 for the 450s cycle, ~same fraction)
   int           creditCursor_ = 0;            // cycles them.txt so every worker surfaces over a session
   bool          creditsOn_    = false;        // T8 disabled on the degenerate 877 preview (set in onCreate)
   // ----- v2 5-ACT NARRATIVE RE-SCORE -----
@@ -131,15 +131,15 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   // partway (~0.40, the comfort-fail cap), never back to the Act-I seduction peak (0.95); the loop
   // seam is continuous (V end == I start, both 0.40) so it never hard-resets — a fresh viewer enters
   // at the same partial depth a departing one left on. depth: 1 = galaxy among the points, 0 = core.
-  static constexpr float CYCLE = 840.f;
+  static constexpr float CYCLE = 450.f;   // condensed 840 -> 450 s (7.5 min, ~90 s per act)
   double        cycleClock_ = 0.0;   // double: the accumulator bands the envelope/posterize over hours
   static float actEnvelope(float t, int& act) {            // depth(t) + act index (1..5)
     struct KF { float t, d; };
-    static const KF kf[] = {
-      {  0.f, 0.40f}, {120.f, 0.95f}, {210.f, 0.90f}, {360.f, 0.60f},
-      {510.f, 0.15f}, {600.f, 0.10f}, {720.f, 0.30f}, {840.f, 0.40f},
+    static const KF kf[] = {                                  // depths UNCHANGED (shape + comfort-fail); only TIMES condensed to 450s
+      {  0.f, 0.40f}, { 64.f, 0.95f}, { 90.f, 0.90f}, {180.f, 0.60f},
+      {270.f, 0.15f}, {360.f, 0.10f}, {396.f, 0.30f}, {450.f, 0.40f},
     };
-    act = (t < 210.f) ? 1 : (t < 360.f) ? 2 : (t < 510.f) ? 3 : (t < 600.f) ? 4 : 5;
+    act = (t < 90.f) ? 1 : (t < 180.f) ? 2 : (t < 270.f) ? 3 : (t < 360.f) ? 4 : 5;   // equal ~90s acts
     for (int i = 0; i < 7; ++i)
       if (t >= kf[i].t && t <= kf[i + 1].t) {
         float u = (t - kf[i].t) / (kf[i + 1].t - kf[i].t);
@@ -162,7 +162,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
   float         turnDive_     = 0.f;            // eased 0..1 once the turn arms
   Vec3d         prevNavPos_   = Vec3d(0, 0, 16);
   Quatd         prevNavQuat_  = Quatd(1, 0, 0, 0);
-  static constexpr float DWELL_T     = 3.0f;    // seconds of near-stillness in Act IV to arm the turn
+  static constexpr float DWELL_T     = 2.0f;    // seconds of near-stillness in Act IV to arm the turn (retimed 3.0->2.0 for the 90s act)
   static constexpr float DWELL_EPS_P = 0.02f;   // positional delta/frame under which the pose "dwells"
   static constexpr float DWELL_EPS_A = 0.01f;   // angular (1-|dot|) delta/frame threshold
   std::string   assetDir = "assets";
@@ -653,7 +653,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
     // and the 1-5 act-audition keys are preserved.
     // audition the 5 acts: keys 1-5 jump the cycle clock to each act's middle (audio + visuals).
     if (k.key() >= '1' && k.key() <= '5') {
-      static const float ACT_T[5] = {120.f, 285.f, 435.f, 555.f, 720.f};
+      static const float ACT_T[5] = {45.f, 135.f, 225.f, 315.f, 405.f};   // act middles for the 450s cycle (keys 1-5)
       cycleClock_ = ACT_T[k.key() - '1'];
       return true;
     }
