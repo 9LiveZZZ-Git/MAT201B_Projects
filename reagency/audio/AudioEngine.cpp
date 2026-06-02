@@ -888,7 +888,7 @@ void AudioEngine::render(al::AudioIOData& io) {
   if (std::fabs(damp - lastDamp_) > 1e-3f) { reverb_.damping(damp); lastDamp_ = damp; }
 
   const float isr = 1.f / float(sr_), master = 0.28f, outTrim = 0.316f;   // outTrim = -10 dB output trim (AlloSphere console gain broken / piece too loud); applied POST-tanh so it's a true -10 dB
-  const float aLo = 1.f - std::exp(-kTAU * 300.f / float(sr_)), aHi = 1.f - std::exp(-kTAU * 3000.f / float(sr_));
+  const float aLo = 1.f - std::exp(-kTAU * 300.f / float(sr_)), aHi = 1.f - std::exp(-kTAU * 3000.f / float(sr_)), aTop = 1.f - std::exp(-kTAU * 7000.f / float(sr_));
   const float slot = slotRate(depth, hes, act);
   // dubstep growl wobble rate VARIES a lot: re-pick a musical multiple of the beat every ~0.5-2 s,
   // and add a slow continuous sweep so the wub is never static.
@@ -1147,6 +1147,8 @@ void AudioEngine::render(al::AudioIOData& io) {
     masterLoR_ = dn(masterLoR_ + aLo * (R - masterLoR_)); R += 2.16f * masterLoR_;
     masterHiL_ = dn(masterHiL_ + aHi * (L - masterHiL_)); L += 0.45f * (masterHiL_ - L);   // pink HF tilt
     masterHiR_ = dn(masterHiR_ + aHi * (R - masterHiR_)); R += 0.45f * (masterHiR_ - R);
+    masterTopL_ = dn(masterTopL_ + aTop * (L - masterTopL_)); L += 0.369f * (masterTopL_ - L);   // -4 dB high-shelf @ ~7 kHz (tame the harsh top); 0.369 = 1 - 10^(-4/20)
+    masterTopR_ = dn(masterTopR_ + aTop * (R - masterTopR_)); R += 0.369f * (masterTopR_ - R);
     // 2c GLITCH: bitcrush + stutter the master inside an armed window (image resolving OUT of glitch).
     // Capture the clean master into the stutter ring every frame; when armed, blend in the looped+crushed window.
     // All fixed arrays, no alloc; applied AFTER the EQ tilt, BEFORE the tanh so the ceiling still bounds it.

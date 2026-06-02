@@ -303,7 +303,7 @@ class AudioEngine {
   std::vector<float> ppL_, ppR_; int ppN_ = 0, ppPos_ = 0;
   float panLFO_ = 0.f;
   float lastDepth_ = 1.f, moodLP_ = 1.f, tension_ = 0.f, padBloom_ = 1.f, reverbWet_ = 0.3f;
-  float masterLoL_ = 0.f, masterLoR_ = 0.f, masterHiL_ = 0.f, masterHiR_ = 0.f;
+  float masterLoL_ = 0.f, masterLoR_ = 0.f, masterHiL_ = 0.f, masterHiR_ = 0.f, masterTopL_ = 0.f, masterTopR_ = 0.f;
 
   // ---- dome spatialization state (Stage 1) ----
   std::atomic<float> cLeadX_{0.f}, cLeadY_{0.f}, cLeadZ_{-4.f};   // THEM focus point (listener-relative dir)
