@@ -71,7 +71,9 @@ md5sum assets/points.bin assets/edges.bin assets/atlas_0.png assets/vessel.wswv 
 
 **4. Install build prerequisites on each Linux node:** `cmake >= 3.24`, a C++14 compiler (the
 whole project is **C++14** — the AlloSphere toolchain has no C++17; allolib is C++14 too),
-and allolib's transitive dev packages (GL / X11 / ALSA). Audio runs only on the primary.
+allolib's transitive dev packages (GL / X11 / ALSA), and — on the **audio host** —
+**`libfftw3` single-precision (`fftw3f`) + its dev headers** for the decorrelated-bed audio
+(`al_ext/spatialaudio`; see "Audio spatialization" below). Audio runs only on the primary.
 
 **5. Build once per node.** Preferred (passes an absolute assets path → CWD-independent):
 ```bash
@@ -109,6 +111,31 @@ GPU's `GL_MAX_TEXTURE_SIZE` and **warn-only** if exceeded — allolib then uploa
 Mac, those billboards go black even though the file is present. Fix: check the dome GPUs' max,
 and if needed re-bake with more columns (smaller per-tile size) — `v2/bake_emergence.py` /
 `v2/bake_dreams.py` expose the `COLS` knob for exactly this.
+
+## Audio spatialization (dome) — needs FFTW
+
+Audio is primary-only (renderers are silent). On the dome the piece spatializes across the speaker array:
+- **Placement** — `al::AmbisonicsSpatializer` over `AlloSphereSpeakerLayoutCompensated()` (dim 3, order 3)
+  positions the stems in 3D (the THEM voice sounds *from its galaxy node*). Pure allolib core — no extra deps.
+- **Envelopment** — `al::Decorrelation` (`al_ext/spatialaudio`, i.e. **alloaudio**) spreads the bed across all
+  54 speakers as a diffuse field. **This needs FFTW** (`fftw3f`, via the bundled `zita-convolver`).
+
+`configureAudio` opens **60 output channels** on the dome (chosen by `al::sphere::isSphereMachine()`); the
+Mac dev build stays stereo with the spatializer off (`spat_` null), so nothing changes locally.
+
+Prerequisites on the AUDIO host:
+1. Install **FFTW single-precision + dev headers**: Linux `apt install libfftw3-dev`; macOS `brew install fftw`
+   (then build with `CMAKE_PREFIX_PATH=/opt/homebrew` so CMake finds it).
+2. `al_ext/spatialaudio` builds as `al_spatialaudio` **only when CMake finds FFTW**. When it does, the reagency
+   build auto-defines `WOSW_HAVE_DECORR` and links it (via the playground's `${AL_EXT_LIBRARIES}`). **If FFTW is
+   absent the decorrelation code compiles out gracefully** — you still get the Ambisonics placement, just
+   without the decorrelated-bed envelopment.
+3. **Known `al_ext/spatialaudio` gotcha (a separate submodule — NOT fixable from the reagency repo):** its
+   `CMakeLists.txt` does `find_library(FFTW_LIBRARY …)` but no `find_path` for the header, so on Homebrew macOS
+   the build fails with `fftw3.h not found`. One-line fix (applied locally during dev): add
+   `find_path(FFTW_INCLUDE_DIR fftw3.h)` and append `${FFTW_INCLUDE_DIR}` to that extension's
+   `target_include_directories`. On Linux `fftw3.h` is usually on the default include path so the stock
+   extension builds; if it errors there, apply the same patch. (Its `if($CMAKE_SYSTEM_NAME}` typo is harmless.)
 
 ## What's NOT a problem (audited)
 - No hardcoded `/Users/` or absolute paths in any shipped runtime source.
