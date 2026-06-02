@@ -294,7 +294,7 @@ struct WoSW : public DistributedAppWithState<WoSWState> {
 
       // v2 5-act re-score: advance the cycle clock (slowed by hesitation), read the act + depth.
       // Everything below (trace cadence, the depth crossfade, the dive) subordinates to this.
-      cycleClock_ += dt * (1.0 - 0.4 * double(s.hesitation));
+      cycleClock_ += dt * (1.0 - 0.15 * double(s.hesitation));   // breathe with hesitation but only slightly, so each loop lands near 7:30 (was 0.4 -> up to 40% slower)
       const float cycleT = float(std::fmod(cycleClock_, double(CYCLE)));
       int act; const float actDepth = actEnvelope(cycleT, act);   // act 1..5; depth 1=galaxy..0=core
 

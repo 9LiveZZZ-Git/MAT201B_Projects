@@ -440,7 +440,7 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
   static const float GLITCH_DENS[6]  = {0.f, 0.f, 0.04f, 0.30f, 0.35f, 0.f};   // {fallback,I,II,III,IV,V}: P(op | grid hit); III crescendo via f, IV TURN loudest
   static const float GLITCH_CRUSH[6] = {0.f, 0.f, 0.20f, 0.75f, 0.55f, 0.f};   // 0..1 destroyed (resolving in V)
   static const float GLITCH_STUT[6]  = {0.f, 0.f, 0.f,   0.60f, 0.40f, 0.f};   // P(stutter | op)
-  static const float GLITCH_GATE[6]  = {0.f, 0.f, 0.10f, 0.45f, 0.35f, 0.f};   // master micro-gate depth
+  static const float GLITCH_GATE[6]  = {0.f, 0.f, 0.f,   0.f,   0.f,   0.f};   // master micro-gate DISABLED (was {.,.,0.10,0.45,0.35,.} -> read as annoying rhythmic volume drops; restore to re-enable)
   // III rises across the section (crescendo into the cliff); IV is an aftershock; V ramps to 0 (resolves out).
   float glDensF = (a == 3) ? (0.4f + 0.6f * f) : (a == 5 ? (1.f - f) : 1.f);
   cGlitchDens_.store(GLITCH_DENS[a] * glDensF, std::memory_order_relaxed);
@@ -472,7 +472,11 @@ void AudioEngine::update(float dt, float hesitation, float depth, float progress
       if (step > lastEmergeStep_) {
         cStutLen_.store(0.060f - 0.052f * emg, std::memory_order_relaxed);
         cCrush_.store(1.f - emg, std::memory_order_relaxed);
-        Ev g{}; g.kind = EV_GLITCH; g.islot = 0; g.a = 0.060f - 0.052f * emg; g.b = 1.f - emg; push(g);
+        // DISABLED: the per-emergence-step master stutter read as annoying audio drops while dreams form
+        // (esp. dense post-5min where the Act-V recap re-forms). The VISUAL dream emergence + the bed are
+        // unaffected (cEmerge_ still drives them); only the master glitch-stutter is removed.
+        // Ev g{}; g.kind = EV_GLITCH; g.islot = 0; g.a = 0.060f - 0.052f * emg; g.b = 1.f - emg; push(g);
+        (void)0;
       }
       lastEmergeStep_ = step;
     } else { lastEmergeStep_ = -1; } }                                  // emergence cleared -> re-arm step 0
