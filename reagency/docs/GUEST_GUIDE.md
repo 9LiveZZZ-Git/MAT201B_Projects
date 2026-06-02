@@ -37,14 +37,16 @@ A living score that grows from the same data you're seeing — a deep drone, shi
 **ghostly voices**: fragments of real workers' testimony. On the dome the sound moves **around
 you** in space, with the bass felt from below. The voices are *THEM*, made audible.
 
-## The arc — five acts
-| | Act | What shifts |
-|---|---|---|
-| **I** | **Seduction** | The galaxy is gorgeous and inviting; warm, enveloping sound. You fall for it. |
-| **II** | **Reading** | The machine starts *labeling* — words stamp onto the images as it classifies what it sees. |
-| **III** | **Extraction** | The grind. Images are consumed faster, dissolving into grains; the sound hardens — the cost surfaces, and the workers' names begin to appear. |
-| **IV** | **The Turn** | Everything drops to a bare pulse and near-silence. This is the mirror — *you used it; did you look for them?* |
-| **V** | **Residue** | It brightens again — but only **partway**. It never returns to the Act-I bliss. The workers' names remain, haunting the comfort. Then it loops. |
+## The arc — five acts (~14-minute cycle, then it loops)
+| | Act | ≈ When | What shifts |
+|---|---|---|---|
+| **I** | **Seduction** | **0:00–3:30** | The galaxy is gorgeous and inviting; warm, enveloping sound. You fall for it. |
+| **II** | **Reading** | **3:30–6:00** | The machine starts *labeling* — words stamp onto the images as it classifies what it sees. |
+| **III** | **Extraction** | **6:00–8:30** | The grind. Images are consumed faster, dissolving into grains; the sound hardens — the cost surfaces, and the workers' names begin to appear. |
+| **IV** | **The Turn** | **8:30–10:00** | Everything drops to a bare, hushed pulse. This is the mirror — *you used it; did you look for them?* |
+| **V** | **Residue** | **10:00–14:00** | It brightens again — but only **partway**. It never returns to the Act-I bliss. The workers' names remain, haunting the comfort. Then it loops. |
+
+*Times are approximate: the piece runs on a ~14-minute clock that **slows when the machine "hesitates,"** so an act can linger a little past its mark.*
 
 ## The turn is yours
 **Act IV listens to you.** If you grow still and simply *look* — in the dome, it senses your
