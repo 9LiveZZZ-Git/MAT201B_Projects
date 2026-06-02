@@ -324,7 +324,7 @@ class AudioEngine {
   al::Reverb<float> reverb_;
   al::Reverb<float> sampRev_;       // short mono reverb to blend the CC0 samples
   float  lastDecay_ = -1.f, lastDamp_ = -1.f;
-  double sr_ = 44100.0;
+  double sr_ = 48000.0;   // overwritten by init() from configureAudio; default matches the piece's 48 kHz
   std::atomic<bool> ready_{false};
 
   void loadManifest(const std::string& assetDir);

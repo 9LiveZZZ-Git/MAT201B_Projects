@@ -665,7 +665,7 @@ int main(int argc, char** argv) {
   auto app = std::make_unique<WoSW>();
   if (argc > 1) app->assetDir = argv[1];     // run_demo.sh passes an absolute assets path
   const bool wsw_dome = al::sphere::isSphereMachine();
-  app->configureAudio(44100, 512, wsw_dome ? 60 : 2, 0);   // 60 dome speaker channels on the AlloSphere; stereo on the Mac
+  app->configureAudio(48000, 512, wsw_dome ? 60 : 2, 0);   // 48 kHz; 60 dome speaker channels on the AlloSphere; stereo on the Mac
   app->title("World of Shadow Work");
   app->start(/*packetSize=*/4096);           // WoSWState is tiny
   return 0;
